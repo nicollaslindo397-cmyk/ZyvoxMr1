@@ -147,6 +147,12 @@ private fun DrawScope.drawClouds(hPx: Float, sheet: Float, flash: Float) {
     // espaços num gradiente é como se produz uma faixa de nuvem que aparece no lugar errado só
     // em aparelhos com densidade diferente da de desenvolvimento — um bug que o emulador nunca
     // mostra. Aqui `drawRect` nativo e `hPx` estão no mesmo espaço, sem conversão nenhuma.
+    //
+    // `pxPerDp` é capturado ANTES de entrar no lambda: dentro dele o receiver passa a ser
+    // `Canvas`, que tem a própria `density: Float` — escrever `density.density` ali resolve o
+    // primeiro `density` para o do Canvas e o segundo não existe em Float.
+    val pxPerDp = density.density
+    val rightPx = size.width * pxPerDp
     drawIntoCanvas { canvas ->
         cloudPaint.shader = LinearGradient(
             0f,
@@ -157,7 +163,7 @@ private fun DrawScope.drawClouds(hPx: Float, sheet: Float, flash: Float) {
             CLOUD_BASE.copy(alpha = 0f).toArgb(),
             Shader.TileMode.CLAMP,
         )
-        canvas.nativeCanvas.drawRect(0f, 0f, size.width * density.density, hPx, cloudPaint)
+        canvas.nativeCanvas.drawRect(0f, 0f, rightPx, hPx, cloudPaint)
     }
 }
 
