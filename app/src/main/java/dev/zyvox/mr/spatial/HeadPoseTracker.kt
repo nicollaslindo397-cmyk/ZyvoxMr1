@@ -6,7 +6,6 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import dev.romainguy.kotlin.math.Quaternion
-import dev.romainguy.kotlin.math.float3
 
 /**
  * Pose de cabeça 3DoF: a orientação do aparelho vira a orientação da câmera da cena.
@@ -91,11 +90,11 @@ class HeadPoseTracker(context: Context) : SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
-    companion object {
-        /**
-         * Eixo "para frente" da cena. Usado para posicionar o dock à frente do usuário
-         * independentemente de para onde ele está olhando.
-         */
-        val FORWARD = float3(0f, 0f, -1f)
-    }
+    // Não há companion object aqui de propósito. Ele existia só para um `FORWARD =
+    // float3(0f, 0f, -1f)` que nunca teve consumidor: o dock é posicionado em coordenadas de
+    // mundo pelo DockPanelHost, não a partir de um eixo "para frente" derivado da pose.
+    //
+    // Além de morto, não compilava: `dev.romainguy.kotlin.math.float3` não existe. O kotlin-math
+    // expõe a classe `Float3`; `float3` minúsculo é convenção de outra biblioteca. Manter a
+    // constante "para quando precisar" custaria um import inválido e um erro de compilação.
 }

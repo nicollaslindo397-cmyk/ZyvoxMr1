@@ -114,7 +114,12 @@ class MrViewModel(application: Application) : AndroidViewModel(application) {
     fun ensurePipeline(): HandTrackerPipeline? {
         pipeline?.let { return it }
         if (closed) return null
-        val created = HandTrackerPipeline(getApplication()) { frame -> onHandFrame(frame) }
+        // `onResult =` nomeado de propósito. O construtor é
+        // `HandTrackerPipeline(context, onResult, maxHands = 2)`, então uma lambda à solta depois
+        // do context vai para o ÚLTIMO parâmetro — `maxHands: Int` — e não para `onResult`. O
+        // compilador responde com "Argument type mismatch: 'Int' was expected" mais "No value
+        // passed for parameter 'onResult'", que são dois erros para um único deslize.
+        val created = HandTrackerPipeline(getApplication(), onResult = { frame -> onHandFrame(frame) })
         pipeline = created
         handTrackingAvailable = created.isAvailable
         if (!created.isAvailable) {

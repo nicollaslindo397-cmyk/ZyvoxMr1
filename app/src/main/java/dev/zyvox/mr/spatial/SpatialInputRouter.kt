@@ -6,10 +6,15 @@ import dev.zyvox.mr.hand.TrackedHand
 import dev.zyvox.mr.ui.CursorPanelHost
 import dev.zyvox.mr.ui.DockPanelHost
 import dev.zyvox.mr.ui.WindowPanelHost
+// `WindowPanelRecord` mora em `dev.zyvox.mr.ui` (é declarada em WindowPanelHost.kt), NÃO em
+// `dev.zyvox.mr.window`. Um import errado aqui custa muito mais que uma linha: com o tipo não
+// resolvido, tudo que deriva dele degrada para `Any`, e o compilador passa a reportar cascata —
+// `Unresolved reference 'touch'`, `'node'`, e `let` "inapplicable because of a receiver type
+// mismatch" — em pontos do arquivo que estão corretos. Foram ~19 erros vindos desta linha.
+import dev.zyvox.mr.ui.WindowPanelRecord
 import dev.zyvox.mr.window.MrWindow
 import dev.zyvox.mr.window.WindowController
 import dev.zyvox.mr.window.WindowMetrics
-import dev.zyvox.mr.window.WindowPanelRecord
 import kotlin.math.roundToInt
 
 /**
