@@ -60,6 +60,40 @@ jobs:
       # mora o `sdkmanager`), e `build-tools;37.0.0` pode não ser a versão publicada para a
       # platform 37. Esta action instala o cmdline-tools, aceita licenças e resolve as
       # versões, que é exatamente o que não se deve reimplementar à mão.
+      # ─── Diagnóstico ANTES de instalar ──────────────────────────────────────────────────
+      # Este passo existe porque o passo de instalação falhou duas vezes seguidas (com
+      # sdkmanager à mão e com android-actions/setup-android) e o log do GitHub fica num host
+      # de blob storage que não é legível de fora do runner. Sem isto, cada tentativa é um
+      # chute às cegas de ~1 minuto.
+      #
+      # A hipótese que isto testa: `platforms;android-37` pode não existir no canal estável do
+      # SDK. O AAR do SceneView 4.65.0 declara minCompileSdk=37, e o AGP 9.4 suporta "no
+      # máximo API 37" — mas API 37 pode ainda estar só no canal preview, o que exigiria ou
+      # `channel=1` no sdkmanager ou um SceneView mais antigo.
+      #
+      # `|| true` em tudo: um passo de diagnóstico nunca pode ser o motivo da falha.
+      - name: Diagnóstico do SDK disponível
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
+          echo "ANDROID_HOME='${ANDROID_HOME:-<vazio>}'  ANDROID_SDK_ROOT='${ANDROID_SDK_ROOT:-<vazio>}'"
+          echo "SDK_ROOT=$SDK_ROOT"
+          echo "── conteúdo de SDK_ROOT ──"
+          ls -1 "$SDK_ROOT" 2>&1 || echo "  (ausente)"
+          echo "── platforms já instaladas ──"
+          ls -1 "$SDK_ROOT/platforms" 2>&1 || echo "  (nenhuma)"
+          echo "── build-tools já instalados ──"
+          ls -1 "$SDK_ROOT/build-tools" 2>&1 || echo "  (nenhum)"
+          echo "── cmdline-tools ──"
+          ls -1 "$SDK_ROOT/cmdline-tools" 2>&1 || echo "  (ausente)"
+          SM="$(find "$SDK_ROOT" -name sdkmanager -type f 2>/dev/null | head -1 || true)"
+          echo "sdkmanager=$SM"
+          if [ -n "$SM" ]; then
+            echo "── platforms DISPONÍVEIS no repositório ──"
+            "$SM" --sdk_root="$SDK_ROOT" --list 2>/dev/null | grep -E "^\s+platforms;android-3[0-9]" || echo "  (grep não achou nada)"
+            echo "── build-tools DISPONÍVEIS ──"
+            "$SM" --sdk_root="$SDK_ROOT" --list 2>/dev/null | grep -E "^\s+build-tools;3[0-9]" || echo "  (grep não achou nada)"
+          fi
+
       - name: Instalar Android SDK (platform 37 + build-tools)
         uses: android-actions/setup-android@v3
         with:
