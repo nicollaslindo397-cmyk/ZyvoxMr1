@@ -125,11 +125,22 @@ class WindowPanelHost(
         return runCatching {
             val context = materialLoader.context
             val windowManager = ViewNode.WindowManager(context)
-            val panelView = WindowPanelView(context).apply {
-                onMinimize = { onMinimize?.invoke(window.id) }
-                onClose = { onClose?.invoke(window.id) }
-                onTitle = { title -> onTitle?.invoke(window.id, title) }
-            }
+            val panelView = WindowPanelView(context)
+            // Fora do `apply`, e com `this@WindowPanelHost` explícito no lado direito.
+            //
+            // Dentro de `WindowPanelView(context).apply { ... }` os dois nomes colidem: a view tem
+            // `onMinimize: (() -> Unit)?` e `onTitle: ((String) -> Unit)?`, enquanto o host tem
+            // `onMinimize: ((String) -> Unit)?` e `onTitle: ((String, String) -> Unit)?`. O receiver
+            // implícito do `apply` ganha a resolução, então `{ onMinimize?.invoke(window.id) }`
+            // chamava o callback da PRÓPRIA view que estava sendo atribuído — recursão infinita no
+            // primeiro clique — e o compilador reportava "Too many arguments for 'fun invoke():
+            // Unit'" porque a versão da view não aceita argumento nenhum.
+            //
+            // O objetivo aqui é encadear: a view avisa "minimizaram" sem saber qual janela é, e o
+            // host acrescenta o id. Qualificar o lado direito é o que expressa isso.
+            panelView.onMinimize = { this@WindowPanelHost.onMinimize?.invoke(window.id) }
+            panelView.onClose = { this@WindowPanelHost.onClose?.invoke(window.id) }
+            panelView.onTitle = { title -> this@WindowPanelHost.onTitle?.invoke(window.id, title) }
             val node = ViewNode(
                 engine = engine,
                 windowManager = windowManager,

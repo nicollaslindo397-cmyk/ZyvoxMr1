@@ -85,4 +85,19 @@ object MrTokens {
 
     /** Posição vertical do dock no mundo (negativo = abaixo do centro do campo de visão). */
     const val DOCK_Y_M = -0.20f
+
+    /**
+     * Largura do dock no mundo, em metros.
+     *
+     * Mora aqui junto com [DOCK_DEPTH_M] e [DOCK_Y_M]: os três descrevem onde o dock fica no
+     * espaço, e separá-los é o que fez `DockPanelHost` e `SpatialInputRouter` referenciarem
+     * `MrTokens.DOCK_WIDTH_M` quando o valor só existia em `DockPanelView`. O tamanho em PIXEL do
+     * dock continua em `DockPanelView.DOCK_WIDTH_PX` — aquele é um detalhe de layout da view; este
+     * é a geometria espacial que `pxPerUnits` e o teste de contenção consomem.
+     *
+     * 0,34 m a 0,40 m de profundidade cobre ~0,7 do campo de visão horizontal: largo o bastante
+     * para os ícones serem alvejáveis pelo hand tracking, estreito o bastante para não dominar o
+     * passthrough — a referência pede explicitamente um dock que NÃO preencha a tela.
+     */
+    const val DOCK_WIDTH_M = 0.34f
 }

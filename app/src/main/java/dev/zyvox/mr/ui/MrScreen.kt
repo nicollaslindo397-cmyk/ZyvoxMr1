@@ -352,55 +352,65 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
     // contra `null` e morrer silenciosamente.
     val root = sceneRoot.value
     DisposableEffect(engine, materialLoader, root, androidView) {
-        if (root == null) {
-            // Sem nó-raiz não há onde pendurar painel. `onDispose {}` é obrigatório: um
-            // DisposableEffect precisa sempre registrar o callback, mesmo quando não faz nada.
-            onDispose { }
-            return@DisposableEffect
-        }
+        // Sem nó-raiz não há onde pendurar painel, e o bloco fica vazio. Mas NÃO com
+        // `if (root == null) { onDispose { }; return@DisposableEffect }`: o bloco de um
+        // DisposableEffect tem de DEVOLVER um DisposableEffectResult, e `return@DisposableEffect`
+        // sem valor devolve Unit. Chamar `onDispose { }` e depois retornar constrói o resultado e
+        // o joga fora — o compilador responde "Return type mismatch: expected
+        // 'DisposableEffectResult', actual 'Unit'". Daí a forma positiva: o `onDispose` final é a
+        // última expressão e vale como retorno em todos os caminhos.
+        if (root != null) {
+            val wHost = WindowPanelHost(
+                engine = engine,
+                materialLoader = materialLoader,
+                root = root,
+                ownerView = androidView,
+            ).apply {
+                onMinimize = { id -> viewModel.minimizeWindow(id) }
+                onClose = { id -> viewModel.closeWindow(id) }
+                onTitle = { id, title -> viewModel.setTitle(id, title) }
+            }
+            val dHost = DockPanelHost(
+                engine = engine,
+                materialLoader = materialLoader,
+                root = root,
+                ownerView = androidView,
+                onAction = onDockAction,
+            )
+            val cHost = CursorPanelHost(
+                engine = engine,
+                materialLoader = materialLoader,
+                root = root,
+                ownerView = androidView,
+            )
+            val inputRouter = SpatialInputRouter(
+                cursorHost = cHost,
+                dockHost = dHost,
+                windowHost = wHost,
+                windowController = windowController,
+            )
+            // Fora do `apply` de propósito. Lá dentro, `onDockAction = onDockAction` não faz o que
+            // parece: o lado DIREITO resolve pelo receiver implícito, mas o lado ESQUERDO de uma
+            // atribuição não resolve — ele pega o `val onDockAction` do composable (linha 166), e o
+            // compilador responde "'val' cannot be reassigned". Os dois lados da mesma expressão
+            // apontavam para coisas diferentes. Aqui, `inputRouter.` e o nome simples são inequívocos.
+            inputRouter.onDockAction = onDockAction
 
-        val wHost = WindowPanelHost(
-            engine = engine,
-            materialLoader = materialLoader,
-            root = root,
-            ownerView = androidView,
-        ).apply {
-            onMinimize = { id -> viewModel.minimizeWindow(id) }
-            onClose = { id -> viewModel.closeWindow(id) }
-            onTitle = { id, title -> viewModel.setTitle(id, title) }
+            windowHost = wHost
+            dockHost = dHost
+            cursorHost = cHost
+            router = inputRouter
         }
-        val dHost = DockPanelHost(
-            engine = engine,
-            materialLoader = materialLoader,
-            root = root,
-            ownerView = androidView,
-            onAction = onDockAction,
-        )
-        val cHost = CursorPanelHost(
-            engine = engine,
-            materialLoader = materialLoader,
-            root = root,
-            ownerView = androidView,
-        )
-        val inputRouter = SpatialInputRouter(
-            cursorHost = cHost,
-            dockHost = dHost,
-            windowHost = wHost,
-            windowController = windowController,
-        ).apply { onDockAction = onDockAction }
-
-        windowHost = wHost
-        dockHost = dHost
-        cursorHost = cHost
-        router = inputRouter
 
         onDispose {
             // Ordem: parar de rotear (pode haver gesto em voo com pointer preso no WebView),
-            // depois destruir os painéis, que liberam WebView e janelas off-screen.
-            inputRouter.reset()
-            cHost.destroy()
-            dHost.destroy()
-            wHost.destroyAll()
+            // depois destruir os painéis, que liberam WebView e janelas off-screen. As variáveis
+            // dos hosts vivem dentro do `if`, então isto não as referencia — e nem precisa: com
+            // root nulo nada foi criado, e os `var ... by remember` já são null.
+            router?.reset()
+            cursorHost?.destroy()
+            dockHost?.destroy()
+            windowHost?.destroyAll()
             windowHost = null
             dockHost = null
             cursorHost = null

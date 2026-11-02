@@ -133,8 +133,12 @@ class DockPanelView(context: Context) : FrameLayout(context) {
         const val DOCK_WIDTH_PX = 1120
         const val DOCK_HEIGHT_PX = 190
 
-        /** Largura do dock no mundo, em metros. Ver [dev.zyvox.mr.window.WindowMetrics]. */
-        const val DOCK_WIDTH_M = 0.34f
+        // A largura do dock em METROS mora em `MrTokens.DOCK_WIDTH_M`, não aqui. Ela já esteve
+        // neste companion object, e foi exatamente isso que quebrou `DockPanelHost` e
+        // `SpatialInputRouter`: ambos liam `MrTokens.DOCK_WIDTH_M`, que não existia, enquanto o
+        // valor real estava aqui. Deixar as duas cópias "por garantia" é o que produz a próxima
+        // divergência — 0,34 m é geometria espacial, que é o assunto do MrTokens; aqui ficam só os
+        // tamanhos em pixel, que são detalhe de layout desta view.
 
         const val DOCK_CORNER_PX = 60f
         private const val BUTTON_CORNER_PX = 28f
