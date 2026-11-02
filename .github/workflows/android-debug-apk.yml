@@ -57,16 +57,19 @@ jobs:
       # vem do CI do próprio SceneView (`.github/workflows/ci.yml` e `build-apks.yml`, na
       # tag v4.65.0): aqueles workflows rodam `assembleDebug` com `compileSdk 37` em
       # `ubuntu-latest` e não contêm NENHUMA menção a `setup-android`, `sdkmanager`,
-      # `platforms;` ou `build-tools;`. Eles confiam no SDK que a imagem do runner já traz.
+      # `platforms;` ou `build-tools;`. Eles deixam o AGP resolver o SDK durante o build,
+      # que é o que ele faz por padrão quando faltam componentes.
       #
-      # Então fazemos o mesmo. O passo de conferência abaixo continua de guarda: se a imagem
-      # do runner um dia regredir, ele falha em segundos com uma mensagem apontando para a
-      # causa certa, em vez de deixar o AGP falhar dez minutos depois culpando outra coisa.
+      # Então fazemos o mesmo. O passo abaixo é só diagnóstico: ele NÃO falha o job. Uma
+      # versão anterior terminava em `exit 1` quando `platforms/android-37` estava ausente,
+      # e isso era justamente o que impedia o AGP de baixar a plataforma — a guarda matava
+      # o build antes de o mecanismo de recuperação ter chance de rodar.
 
       # Diagnóstico barato e à prova de falha. O log do GitHub fica num host de blob storage
       # que não é legível de fora do runner, então cada tentativa às cegas custa um ciclo
-      # inteiro; imprimir o estado aqui torna a próxima falha legível. Nada neste passo pode
-      # derrubar o job, exceto a verificação final explícita.
+      # inteiro; imprimir o estado aqui torna a próxima falha legível. Nada neste passo
+      # derruba o job: se o SDK não estiver pronto, quem vai dizer isso é o Gradle, com a
+      # mensagem real.
       - name: Conferir toolchain
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
@@ -77,14 +80,17 @@ jobs:
           ls -1 "$SDK_ROOT/platforms" 2>&1 || echo "  (diretório ausente)"
           echo "── build-tools instalados ──"
           ls -1 "$SDK_ROOT/build-tools" 2>&1 || echo "  (diretório ausente)"
+          echo "── licenças aceitas ──"
+          ls -1 "$SDK_ROOT/licenses" 2>&1 || echo "  (diretório ausente)"
 
           if [ ! -d "$SDK_ROOT/platforms/android-37" ]; then
-            echo "::error::platforms/android-37 ausente em $SDK_ROOT."
-            echo "::error::O AAR do SceneView 4.65.0 declara minCompileSdk=37, então o build não pode prosseguir."
-            echo "::error::Se a imagem do runner não traz mais a API 37, reinstale com android-actions/setup-android@v3 (packages: 'platforms;android-37')."
-            exit 1
+            # Aviso, não erro. O AGP baixa plataformas faltantes durante o build desde que as
+            # licenças estejam aceitas — e é isso que o passo de Gradle a seguir vai tentar.
+            echo "::warning::platforms/android-37 ainda ausente em $SDK_ROOT; o AGP deve baixá-la durante o build."
+            echo "::warning::Se o Gradle falhar com 'Failed to install the following SDK components', o próximo passo é reinstalar com android-actions/setup-android@v3."
+          else
+            echo "OK: platform 37 já presente."
           fi
-          echo "OK: platform 37 presente."
 
       # O `hand_landmarker.task` é baixado pela tarefa `fetchHandModel` do próprio build.
       # Rodá-la aqui primeiro separa "a rede falhou" de "o código não compila", que são dois

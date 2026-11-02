@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -24,17 +25,38 @@ import dev.zyvox.mr.hand.TrackedHand
 import dev.zyvox.mr.spatial.HeadPoseTracker
 import dev.zyvox.mr.spatial.ScreenMapper
 import dev.zyvox.mr.spatial.SpatialInputRouter
-import dev.zyvox.mr.spatial.screenToWorld
 import dev.zyvox.mr.window.WindowController
 import io.github.sceneview.FrameRatePolicy
 import io.github.sceneview.SceneView
 import io.github.sceneview.SurfaceType
+import io.github.sceneview.node.Node
 import io.github.sceneview.rememberCameraNode
 import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMaterialLoader
-import io.github.sceneview.rememberNode
 import io.github.sceneview.rememberScene
 import io.github.sceneview.rememberView
+// `screenToWorld` é extensão de `com.google.android.filament.View` que vive em
+// io.github.sceneview.utils.ViewKt. Retorna Position? (= Float3?) — anulável, porque devolve
+// null quando a view ainda não tem câmera. Nunca confundir com uma função deste projeto:
+// não existe dev.zyvox.mr.spatial.screenToWorld.
+import io.github.sceneview.utils.screenToWorld
+import kotlin.math.sqrt
+
+// ─── Constantes da projeção do cursor ─────────────────────────────────────────────────────
+//
+// `View.screenToWorld(xPx, yPx, z)` não recebe metros. O `z` é profundidade normalizada de
+// recorte, e a KDoc de `Camera.viewToWorld` no SceneView define: **1 = plano próximo,
+// 0 = infinito**. Estes valores ecoam exatamente as duas amostras que o próprio SceneView usa
+// em `Camera.viewToRay` (`startPosition = z 0.0f`, `endPosition = z 1.0f`), então são as
+// extremidades reais do intervalo e não um palpite.
+private const val NEAR_SAMPLE_Z = 1.0f
+private const val FAR_SAMPLE_Z = 0.0f
+
+// Distância da câmera ao plano próximo, em metros. Espelha o padrão do `CameraNode` do
+// SceneView (`_near = 0.01f`). Só é usada para converter "distância desde o plano próximo" em
+// "distância desde a câmera"; como 0,01 m é 2% de INTERACTION_DEPTH_M, uma pequena deriva aqui
+// desloca o cursor em milímetros — e o plano de interação já é arbitrário por construção.
+private const val NEAR_PLANE_M = 0.01f
 
 /**
  * A experiência MR: passthrough no fundo, cena 3D transparente por cima, HUD 2D no topo.
@@ -107,9 +129,21 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
     val cameraNode = rememberCameraNode(engine)
     val scene = rememberScene(engine)
 
-    // Raiz de conteúdo. Os painéis são criados imperativamente e pendurados aqui — ver
-    // [WindowPanelHost] para o motivo de não usar o composable `ViewNode { }`.
-    val contentRoot = rememberNode(engine)
+    // ─── Raiz de conteúdo dos painéis ───────────────────────────────────────────────────
+    // Os painéis (janelas WebView, dock, cursor) são `ViewNode` criados imperativamente e
+    // pendurados num único nó-raiz — ver [WindowPanelHost] para o motivo de não usar o
+    // composable `ViewNode { }` do SceneScope.
+    //
+    // Esse nó-raiz NÃO pode ser criado com `rememberNode(engine)` e anexado depois:
+    // `SceneScope.attach()` e `NodeLifecycle()` são `internal`/`@RestrictTo(LIBRARY_GROUP_PREFIX)`,
+    // e `SceneScope` não expõe `addChildNode` (esse método é de `Node`, não do escopo). A única
+    // porta pública para a raiz da cena é o composable `SceneScope.Node(...)`, que cria E anexa
+    // o nó. Então deixamos ele criar o nó e o capturamos via `apply`, que roda uma única vez
+    // dentro do `remember(engine)` da biblioteca.
+    //
+    // É `MutableState` (e não `by mutableStateOf`) de propósito: o `apply` precisa escrever sem
+    // delegação de propriedade, e os hosts leem `.value` fora da composição.
+    val sceneRoot: MutableState<Node?> = remember { mutableStateOf(null) }
 
     // Dimensões da view, para o mapeamento imagem→tela. `onSizeChanged` dá o valor real da
     // superfície, que é o que o `screenToWorld` espera em pixel.
@@ -173,7 +207,6 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
             // brigando com a pose da cabeça.
             cameraManipulator = null,
             onFrame = {
-                val root = contentRoot
                 val wHost = windowHost
                 val dHost = dockHost
                 val cHost = cursorHost
@@ -218,18 +251,68 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
                         viewModel.cursorScreenX = sx
                         viewModel.cursorScreenY = sy
 
-                        // Pixel → mundo no plano de interação. `screenToWorld` usa a projeção
-                        // real que está sendo desenhada, então não precisamos reconstituir
-                        // FOV nem base da câmera à mão.
-                        val world = filamentView.screenToWorld(
-                            sx,
-                            sy,
-                            MrTokens.INTERACTION_DEPTH_M,
-                        )
-                        cx = world.x
-                        cy = world.y
-                        cz = world.z
-                        cursorValid = true
+                        // ── Pixel → mundo, a uma distância MÉTRICA fixa da câmera ──────────
+                        //
+                        // `screenToWorld(xPx, yPx, z)` NÃO recebe metros: o `z` é profundidade
+                        // normalizada de recorte, 1 = plano próximo e 0 = infinito (ver a KDoc de
+                        // `Camera.viewToWorld` no SceneView). Passar `INTERACTION_DEPTH_M` direto
+                        // ali — como uma versão anterior deste código fazia — colocaria o cursor
+                        // numa profundidade sem relação com 0,45 m, e o erro seria invisível: o
+                        // cursor apareceria, só que na distância errada, e o toque não alinharia
+                        // com as janelas.
+                        //
+                        // Então amostramos o mesmo pixel nas duas extremidades do intervalo e
+                        // derivamos a direção do raio pela diferença.
+                        //
+                        // O SINAL dessa direção não é assumido. O `Camera.viewToRay` do SceneView
+                        // monta `direction = viewToWorld(z=1) - viewToWorld(z=0)`, ou seja, do
+                        // plano próximo para o infinito — o oposto do que queremos aqui. Em vez de
+                        // decorar qual convenção vale, comparamos a distância de cada amostra à
+                        // câmera: em 3DoF a câmera fica na origem da cena (só escrevemos
+                        // `quaternion`, nunca `position`), então a amostra mais distante da origem
+                        // é a mais funda na cena, e o vetor que sai da mais próxima e vai à mais
+                        // distante aponta para longe da câmera por construção. Se uma futura
+                        // versão do SceneView inverter o mapeamento de `z`, isto continua certo.
+                        //
+                        // Custo: duas `screenToWorld` por frame, cada uma invertendo uma matriz
+                        // 4×4. É aceitável, mas é o primeiro lugar a otimizar se o orçamento de
+                        // frame apertar — a projeção não muda entre frames, então as duas amostras
+                        // podem virar uma origem + direção pré-calculadas.
+                        val nearSample = filamentView.screenToWorld(sx, sy, NEAR_SAMPLE_Z)
+                        val farSample = filamentView.screenToWorld(sx, sy, FAR_SAMPLE_Z)
+                        if (nearSample != null && farSample != null) {
+                            // `viewToWorld` devolve `Position()` — a origem — quando o `w` do
+                            // espaço de recorte degenera (`almostEquals 0.0f`). Uma amostra
+                            // degenerada na origem faria a comparação de distância abaixo escolher
+                            // o lado errado, então as duas precisam ser utilizáveis.
+                            val nearDist2 = nearSample.x * nearSample.x +
+                                nearSample.y * nearSample.y + nearSample.z * nearSample.z
+                            val farDist2 = farSample.x * farSample.x +
+                                farSample.y * farSample.y + farSample.z * farSample.z
+
+                            if (nearDist2 > 1e-12f && farDist2 > 1e-12f && farDist2 > nearDist2) {
+                                var dx = farSample.x - nearSample.x
+                                var dy = farSample.y - nearSample.y
+                                var dz = farSample.z - nearSample.z
+                                val len = sqrt(dx * dx + dy * dy + dz * dz)
+
+                                // Sem esta guarda, dividir por ~0 produz NaN, que se propaga para a
+                                // posição do cursor e congela o painel sem nenhum log.
+                                if (len > 1e-6f) {
+                                    dx /= len; dy /= len; dz /= len
+                                    val travel = MrTokens.INTERACTION_DEPTH_M - NEAR_PLANE_M
+                                    val px = nearSample.x + dx * travel
+                                    val py = nearSample.y + dy * travel
+                                    val pz = nearSample.z + dz * travel
+                                    // Última barreira antes de publicar: um NaN aqui viraria um
+                                    // painel invisível e um gesto que nunca fecha.
+                                    if (px.isFinite() && py.isFinite() && pz.isFinite()) {
+                                        cx = px; cy = py; cz = pz
+                                        cursorValid = true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -249,8 +332,13 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
                 )
             },
         ) {
-            // Os painéis vivem em `contentRoot`, adicionado à cena uma única vez.
-            addChildNode(contentRoot)
+            // `SceneScope` não tem `addChildNode` — esse método é de `Node`, não do escopo — e
+            // `attach()`/`NodeLifecycle()` são `internal`/`@RestrictTo(LIBRARY_GROUP_PREFIX)`,
+            // então não dá para adotar um nó criado lá fora. A única porta pública para a raiz da
+            // cena é o composable `Node(...)`, que cria E anexa. Deixamos ele criar o nó e o
+            // capturamos em `apply`, que roda uma única vez dentro do `remember(engine)` da
+            // biblioteca. Os painéis imperativos são pendurados nele pelo DisposableEffect abaixo.
+            Node(apply = { sceneRoot.value = this })
         }
 
         // 3. HUD 2D.
@@ -258,11 +346,23 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
     }
 
     // ─── Criação dos hosts, depois que a cena existe ────────────────────────────────────
-    DisposableEffect(engine, materialLoader, contentRoot, androidView) {
+    // A chave inclui `sceneRoot.value` de propósito: este bloco está DEPOIS do `Box` no corpo do
+    // composable, então o `Node(...)` lá dentro já rodou e já publicou o nó — mas se a ordem um
+    // dia mudar, a chave faz o efeito relançar quando o nó aparecer, em vez de construir os hosts
+    // contra `null` e morrer silenciosamente.
+    val root = sceneRoot.value
+    DisposableEffect(engine, materialLoader, root, androidView) {
+        if (root == null) {
+            // Sem nó-raiz não há onde pendurar painel. `onDispose {}` é obrigatório: um
+            // DisposableEffect precisa sempre registrar o callback, mesmo quando não faz nada.
+            onDispose { }
+            return@DisposableEffect
+        }
+
         val wHost = WindowPanelHost(
             engine = engine,
             materialLoader = materialLoader,
-            root = contentRoot,
+            root = root,
             ownerView = androidView,
         ).apply {
             onMinimize = { id -> viewModel.minimizeWindow(id) }
@@ -272,14 +372,14 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
         val dHost = DockPanelHost(
             engine = engine,
             materialLoader = materialLoader,
-            root = contentRoot,
+            root = root,
             ownerView = androidView,
             onAction = onDockAction,
         )
         val cHost = CursorPanelHost(
             engine = engine,
             materialLoader = materialLoader,
-            root = contentRoot,
+            root = root,
             ownerView = androidView,
         )
         val inputRouter = SpatialInputRouter(
