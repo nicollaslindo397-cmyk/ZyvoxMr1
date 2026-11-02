@@ -39,6 +39,15 @@ class WindowControllerTest {
         viewY = 0.5f,
         pinchRatio = if (pinching) 0.3f else 0.9f,
         isPinching = pinching,
+        // `TrackedHand` não tem valor padrão em nenhum campo, de propósito: `isRightHand` decide
+        // se os gestos globais disparam, então um padrão `false` silenciaria a omissão exata que
+        // importa. Passar os dois explicitamente aqui mantém esse contrato.
+        //
+        // `isFist = false` porque o controller não lê punho. `isRightHand = true` para bater com
+        // `viewX = 0.5f` e com o rótulo acima — na produção `isRightHand` vem do lado da tela, e
+        // um fixture que se contradiz convida alguém a "corrigir" o código de produção depois.
+        isFist = false,
+        isRightHand = true,
         handScale = 0.2f,
         trackingScore = 1f,
     )
