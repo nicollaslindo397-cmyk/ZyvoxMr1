@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zyvox MR</string>
+
+    <!-- Permissão de câmera -->
+    <string name="permission_camera_title">Câmera necessária</string>
+    <string name="permission_camera_body">O Zyvox MR usa a câmera traseira como passthrough e para rastrear suas mãos. Nada é enviado para fora do aparelho.</string>
+    <string name="permission_camera_grant">Permitir câmera</string>
+    <string name="permission_camera_settings">Abrir configurações</string>
+    <string name="permission_camera_denied">Sem acesso à câmera não há passthrough nem hand tracking.</string>
+
+    <!-- Estado / avisos -->
+    <string name="status_initializing">Iniciando câmera…</string>
+    <string name="status_no_model">Modelo de hand tracking ausente — veja BUILD.md</string>
+    <string name="status_show_hands">Mostre as duas mãos para a câmera</string>
+    <string name="status_tracking">Rastreando %1$d mão(s)</string>
+
+    <!-- Dock -->
+    <string name="dock_toggle">Mostrar/ocultar dock</string>
+    <string name="dock_browser">Navegador</string>
+    <string name="dock_apps">Aplicativos</string>
+    <string name="dock_recenter">Recentralizar</string>
+    <string name="dock_settings">Ajustes</string>
+    <string name="dock_close_all">Fechar tudo</string>
+
+    <!-- Janelas -->
+    <string name="window_minimize">Minimizar</string>
+    <string name="window_close">Fechar</string>
+    <string name="window_resize">Redimensionar</string>
+    <string name="window_move">Mover</string>
+    <string name="window_new_tab">Nova janela</string>
+
+    <!-- Barra de endereço -->
+    <string name="url_hint">Endereço ou busca</string>
+    <string name="url_open">Abrir</string>
+    <string name="url_default">https://example.com</string>
+
+    <!-- Acessibilidade -->
+    <string name="cd_hand_cursor">Cursor da mão</string>
+    <string name="cd_camera_preview">Passthrough da câmera traseira</string>
+</resources>

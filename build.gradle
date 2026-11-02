@@ -1,0 +1,6 @@
+// AGP 9 embute o suporte a Kotlin, então `org.jetbrains.kotlin.android` não existe mais —
+// e com ele desapareceu o bloco `android { kotlinOptions { } }`. O JVM target do Kotlin
+// agora mora na extensão top-level `kotlin { }`, declarada no módulo app.
+plugins {
+    alias(libs.plugins.android.application) apply false
+}

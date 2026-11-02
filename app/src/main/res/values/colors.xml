@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Preto puro: é o que o passthrough mostra antes do primeiro quadro da câmera. -->
+    <color name="mr_background">#FF000000</color>
+    <color name="mr_ic_foreground">#FF7DD3FC</color>
+    <color name="mr_ic_background">#FF0B1020</color>
+</resources>

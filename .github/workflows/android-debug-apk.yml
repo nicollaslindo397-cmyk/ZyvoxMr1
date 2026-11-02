@@ -1,0 +1,107 @@
+# ─── Por que este workflow existe ───────────────────────────────────────────────
+# Compilar um APK exige JDK 21, Gradle 9.x e o Android SDK (compileSdk 37 + build-tools).
+# Este é o único caminho do projeto que produz um APK instalável: os runners do GitHub têm
+# rede e toolchain, e o artefato sai pronto para download.
+#
+# Onde baixar o APK depois do push:
+#   aba "Actions" → run mais recente de "Build debug APK" → seção "Artifacts" no fim da
+#   página → `zyvox-mr-debug-apk`.
+#
+# O artefato do GitHub vem zipado. Para instalar direto no aparelho:
+#   unzip zyvox-mr-debug-apk.zip && adb install -r app-debug.apk
+
+name: Build debug APK
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Um push novo cancela o build do commit anterior: compilar Android leva ~10 min e não faz
+# sentido gastar runner num commit que já foi substituído.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: assembleDebug + testes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 21 é obrigatório, não opcional: o AAR do SceneView 4.65.0 publica bytecode
+      # Java 21 com `inline` functions públicas. Com JDK 17 o build falha apontando para
+      # classes do Kotlin stdlib, o que é confuso de diagnosticar.
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # O repo não versiona `gradle/wrapper/gradle-wrapper.jar` (binário). Então não usamos
+      # `./gradlew`: esta action instala o Gradle da versão declarada em
+      # gradle/wrapper/gradle-wrapper.properties e disponibiliza `gradle` no PATH.
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # O modelo do MediaPipe (~7 MB) é baixado a cada build; o cache do Gradle cobre
+          # dependências, não esse asset.
+          cache-read-only: false
+
+      # compileSdk 37 é exigido pelo AAR do SceneView. Os runners ubuntu-24.04 vêm com um
+      # SDK pré-instalado, mas não necessariamente com a plataforma 37 — por isso instalamos
+      # explicitamente em vez de confiar no que já está lá.
+      - name: Instalar plataforma Android 37 e build-tools
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
+          echo "Usando SDK em: $SDK_ROOT"
+          SDKMANAGER="$(find "$SDK_ROOT" -name sdkmanager -type f 2>/dev/null | head -1 || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager não encontrado em $SDK_ROOT"
+            exit 1
+          fi
+          # `yes |` aceita as licenças. Sem isto o sdkmanager trava esperando input num
+          # ambiente não-interativo e o job morre no timeout.
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+            "platforms;android-37" \
+            "build-tools;37.0.0" \
+            "platform-tools"
+
+      # O `hand_landmarker.task` é baixado pela tarefa `fetchHandModel` do próprio build.
+      # Rodá-la aqui primeiro separa "a rede falhou" de "o código não compila", que são dois
+      # problemas com donos diferentes.
+      - name: Baixar modelo do MediaPipe
+        run: gradle --no-daemon :app:fetchHandModel
+
+      - name: Testes unitários
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+      - name: Montar APK debug
+        run: gradle --no-daemon :app:assembleDebug
+
+      # Publica o APK. `if-no-files-found: error` faz o job falhar em vez de passar em
+      # branco caso o caminho mude — um artifact vazio que "funcionou" é pior que um erro.
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zyvox-mr-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # Os relatórios de teste só interessam quando algo falha, e são a primeira coisa que
+      # se quer abrir nesse caso.
+      - name: Publicar relatórios de teste (em falha)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
