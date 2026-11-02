@@ -220,8 +220,9 @@ jobs:
       # O artifact acima só é baixável logado e vem em zip, o que no navegador do celular é um
       # caminho ruim. Aqui o mesmo APK vira asset de Release, que é um arquivo .apk direto.
       #
-      # A tag é FIXA (`apk-latest`) e o asset tem nome fixo, então a URL de download nunca muda:
-      #   https://github.com/nicollaslindo397-cmyk/ZyvoxMr1/releases/download/apk-latest/zyvox-mr-debug.apk
+      # A tag é FIXA (`apk-latest`) e o asset mantém o nome que o Gradle produz, então a URL de
+      # download nunca muda:
+      #   https://github.com/nicollaslindo397-cmyk/ZyvoxMr1/releases/download/apk-latest/app-debug.apk
       # Cada build substitui o asset (`--clobber`). O preço é não haver histórico de APKs por
       # build — aceitável, porque o histórico de código já está nas tags de commit e nos
       # artifacts (30 dias), e o que se quer aqui é "o APK atual num link que não muda".
@@ -247,8 +248,14 @@ jobs:
           gh release edit "$TAG" \
             --notes "Build de \`${GITHUB_SHA}\` · [run ${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
 
-          gh release upload "$TAG" "$APK#zyvox-mr-debug.apk" --clobber
-          echo "APK publicado: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/zyvox-mr-debug.apk"
+          # Sem rename no upload. A primeira versão deste passo usava "$APK#nome.apk" para
+          # renomear o asset, e o asset publicado continuou `app-debug.apk` — com o passo
+          # reportando sucesso. Então o `#label` não fez o que eu assumi, e insistir nele só
+          # produziria um `echo` imprimindo uma URL que não existe. O nome que o Gradle produz
+          # já é estável e basta; a URL fixa vem da tag fixa, não do nome do asset.
+          gh release upload "$TAG" "$APK" --clobber
+          ASSET=$(basename "$APK")
+          echo "APK publicado: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
 
       # Os logs completos, para quando as annotations não bastarem.
       - name: Publicar relatórios e logs (em falha)
