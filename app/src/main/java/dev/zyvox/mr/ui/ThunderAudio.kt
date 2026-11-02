@@ -117,13 +117,17 @@ class ThunderAudio(
             // integrador de derivar sem limite — sem ele, `brown` cresce até saturar e o som
             // vira um DC offset, não um estrondo.
             brown = brown * 0.985 + (random.nextDouble() * 2.0 - 1.0)
-            val envelope = if (i < attack) {
+            val envelope: Float = if (i < attack) {
                 i / attack
             } else {
-                exp(-(i - attack) / decay).toFloat().toDouble()
+                // `exp` de argumento Float devolve Float. O `.toFloat().toDouble()` que estava
+                // aqui fazia o ramo else ser Double e o if/else inteiro colapsar para o tipo
+                // comum `Comparable<*>` — e então `brown * envelope` deixava de ser número, o
+                // que aparecia três linhas adiante como erro em `sample < 0`.
+                exp(-(i - attack) / decay)
             }
             val sample = brown * envelope
-            val magnitude = if (sample < 0) -sample else sample
+            val magnitude = if (sample < 0.0) -sample else sample
             if (magnitude > peak) peak = magnitude
             // Guarda em float por enquanto; normaliza no segundo passo.
             out[i] = (sample * 8000).toInt().coerceIn(-32768, 32767).toShort()

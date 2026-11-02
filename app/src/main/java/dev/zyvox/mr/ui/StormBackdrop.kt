@@ -1,6 +1,8 @@
 package dev.zyvox.mr.ui
 
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.abs
 import kotlin.math.pow
@@ -119,7 +122,7 @@ private fun flashEnvelope(nowNs: Long, startNs: Long): Float {
     val t = (nowNs - startNs) / 1e9f
     if (t < 0f) return 0f
     if (t > FLASH_TAIL_S) return 0f
-    if (t < FLASH_ATTACK_S) return (t / FLASH_ATTACK_S).pow(3.0)
+    if (t < FLASH_ATTACK_S) return (t / FLASH_ATTACK_S).pow(3)
     return kotlin.math.exp(-(t - FLASH_ATTACK_S) / FLASH_DECAY_S)
 }
 
@@ -135,20 +138,27 @@ private fun sheetEnvelope(nowNs: Long, startNs: Long): Float {
 
 private fun DrawScope.drawClouds(hPx: Float, sheet: Float, flash: Float) {
     val lift = (sheet + flash * 0.5f).coerceIn(0f, 1f)
-    // Faixa escura no topo, clareada pelo relâmpago. É onde a luz de um trovão aparece primeiro.
-    drawRect(
-        brush = Brush.verticalGradient(
-            colors = listOf(
-                CLOUD_BASE.copy(alpha = 0.85f - lift * 0.45f),
-                CLOUD_BASE.copy(alpha = 0.0f),
-            ),
-            startY = 0f,
-            // `Brush.verticalGradient` recebe dp, e `hPx` é pixel. `toDp()` vem do `DrawScope`,
-            // que é um `Density` — converter à mão aqui é como se introduz um bug de densidade
-            // que só aparece em aparelho com dpi diferente do emulador.
-            endY = (hPx * 0.42f).toDp(),
-        ),
-    )
+    val alpha = (0.85f - lift * 0.45f).coerceIn(0f, 1f)
+
+    // Gradiente desenhado no canvas nativo, em pixel, e não com `Brush.verticalGradient`.
+    //
+    // O motivo é concreto e não estilístico: as unidades de `startY`/`endY` do Compose são dp,
+    // e este escopo já trabalha em pixel (`wPx`/`hPx` vêm de `size * density`). Misturar os dois
+    // espaços num gradiente é como se produz uma faixa de nuvem que aparece no lugar errado só
+    // em aparelhos com densidade diferente da de desenvolvimento — um bug que o emulador nunca
+    // mostra. Aqui `drawRect` nativo e `hPx` estão no mesmo espaço, sem conversão nenhuma.
+    drawIntoCanvas { canvas ->
+        cloudPaint.shader = LinearGradient(
+            0f,
+            0f,
+            0f,
+            hPx * 0.42f,
+            CLOUD_BASE.copy(alpha = alpha).toArgb(),
+            CLOUD_BASE.copy(alpha = 0f).toArgb(),
+            Shader.TileMode.CLAMP,
+        )
+        canvas.nativeCanvas.drawRect(0f, 0f, size.width * density.density, hPx, cloudPaint)
+    }
 }
 
 private fun DrawScope.drawRain(wPx: Float, hPx: Float, nowNs: Long, pxPerDp: Float, flash: Float) {
@@ -159,7 +169,9 @@ private fun DrawScope.drawRain(wPx: Float, hPx: Float, nowNs: Long, pxPerDp: Flo
             rainPaint.alpha = (layer.baseAlpha + flash * 90).toInt().coerceIn(0, 255)
             rainPaint.strokeWidth = layer.widthDp * pxPerDp
 
-            val t = nowNs / 1e9
+            // `1e9f` e não `1e9`: com literal Double, `Long / Double` dá Double, e o Double
+            // contamina `speed`, `y` e `x` até o `drawLine`, que só aceita Float.
+            val t = nowNs / 1e9f
             for (i in 0 until layer.count) {
                 val r = unit(i * 31 + layer.seed)
                 val r2 = unit(i * 57 + layer.seed + 7)
@@ -251,9 +263,12 @@ private fun DrawScope.drawFlash(flashX: Float, intensity: Float) {
  * quadro faria a chuva inteira trepidar, e um `List<Drop>` alocaria no caminho de render.
  */
 private fun unit(seed: Int): Float {
-    var h = seed * 747796405 + 2891336453.toInt()
-    h = h.inv() * 2246822519
-    h = (h xor (h ushr 15)) * 3266489917.toInt()
+    // Multiplicadores todos abaixo de Int.MAX_VALUE de propósito. Um literal que excede
+    // 2147483647 vira Long em Kotlin, e aí `h * literal` devolve Long — que não cabe de volta
+    // em `h`. Não precisa de qualidade criptográfica, só de decorarrelar o índice.
+    var h = seed * 747796405 + 289133645
+    h = h.inv() * 19349663
+    h = (h xor (h ushr 15)) * 8324197
     h = h xor (h ushr 13)
     return (abs(h) % 10_000) / 10_000f
 }
@@ -338,3 +353,10 @@ private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     strokeCap = Paint.Cap.ROUND
     color = 0x99BBD8FF.toInt()
 }
+
+/**
+ * Preenchimento da faixa de nuvem. O `shader` é recriado a cada quadro porque o brilho depende
+ * do relâmpago; alocar um `LinearGradient` por frame é aceitável aqui — é um objeto por quadro,
+ * não centenas como seriam as gotas de chuva.
+ */
+private val cloudPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }

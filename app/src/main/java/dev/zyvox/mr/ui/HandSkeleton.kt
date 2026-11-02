@@ -325,6 +325,9 @@ private const val GLOW_STROKE_DP = 9f
 private const val GLOW_ALPHA = 0.45f
 private const val GLOW_BLUR_DP = 16f
 
+/** Núcleo fino quase branco sobre o osso. Fino de propósito: o corpo já vem do quad afunilado. */
+private const val CORE_STROKE_DP = 2.6f
+
 private const val BONE_BASE_DP = 6.0f
 private const val BONE_TIP_DP = 2.6f
 private const val BONE_ALPHA = 0.60f
