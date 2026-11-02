@@ -63,3 +63,32 @@ junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+
+# ─── Plugins Kotlin: declarados, mas NÃO aplicados ────────────────────────────────────────
+# As duas entradas abaixo existem como documentação executável de um caminho que este projeto
+# avaliou e rejeitou. Nenhum módulo as aplica. Não as aplique sem ler isto.
+#
+# O AGP 9 tem Kotlin embutido e, por padrão, PROÍBE `org.jetbrains.kotlin.android`. O
+# SceneView 4.65.0 sai desse padrão — o `gradle.properties` dele traz
+# `android.builtInKotlin=false` + `android.newDsl=false`, e `sceneview/build.gradle` aplica
+# `kotlin.android` + `compose.compiler`. Espelhar isso aqui foi tentado e revertido, por duas
+# razões:
+#
+#   * O motivo deles é específico de biblioteca: binary-compatibility-validator 0.18.x e o
+#     detekt se registram por plugin id ("kotlin-android"), e sob o Kotlin embutido o AGP não
+#     aplica id nenhum, só um `KotlinBaseApiPlugin` interno — então `apiCheck` sai verde sem
+#     validar nada. Este projeto não usa nenhuma das duas ferramentas.
+#   * As duas flags são pareadas, e `newDsl=false` devolve o projeto à DSL antiga do AGP. O
+#     `app/build.gradle.kts` usa blocos da DSL nova (`androidResources { noCompress }`,
+#     `experimentalProperties[...]`, `splits { abi { isEnable } }`). Trocar de DSL para
+#     consertar um import quebrado seria trocar um erro de compilação por vários.
+#
+# A armadilha que levou a essa ida e volta, e que vale registrar: se você aplicar estes
+# plugins, o script de build ganha acesso a `org.jetbrains.kotlin.gradle.dsl.JvmTarget`. Se
+# você NÃO aplicar, referenciar essa classe faz o `build.gradle.kts` não compilar — e o Gradle
+# morre na fase de configuração, antes de qualquer tarefa. O erro aparece na primeira tarefa do
+# workflow (aqui, `:app:fetchHandModel`) e não menciona o script, o que manda você caçar no
+# lugar errado. O JVM target 21 deste projeto é expresso por `compileOptions`, que o Kotlin
+# embutido respeita.
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

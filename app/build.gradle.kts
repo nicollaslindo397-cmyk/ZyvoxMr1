@@ -3,6 +3,12 @@ import java.security.MessageDigest
 
 plugins {
     alias(libs.plugins.android.application)
+    // Nem `org.jetbrains.kotlin.android` nem `org.jetbrains.kotlin.plugin.compose` aqui, e o
+    // motivo está em gradle.properties. Resumo: estamos no Kotlin embutido do AGP 9, que (a)
+    // proíbe explicitamente aplicar `org.jetbrains.kotlin.android` e (b) não traz o KGP para o
+    // classpath, e o plugin do compilador Compose é um subplugin do KGP — sem o KGP aplicado
+    // ele não tem onde se registrar. A compilação Kotlin e a transformação dos `@Composable`
+    // vêm do próprio AGP, habilitadas por `buildFeatures { compose = true }` abaixo.
 }
 
 // ─── Modelo do MediaPipe Hand Landmarker ─────────────────────────────────────
@@ -159,14 +165,16 @@ android {
     }
 }
 
-// AGP 9 registra a extensão top-level `kotlin { }` sozinho. O JVM target 21 é obrigatório:
-// o SceneView e o `kotlin-math` dele publicam `inline` functions em bytecode 21, e um
-// target menor impede o app de chamá-las.
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
-    }
-}
+// ─── JVM target 21 ────────────────────────────────────────────────────────────────────────
+// Não há bloco top-level `kotlin { compilerOptions { jvmTarget.set(...) } }` aqui, e isso é
+// deliberado: aquela DSL referencia `org.jetbrains.kotlin.gradle.dsl.JvmTarget`, classe do
+// Kotlin Gradle Plugin. Sob o Kotlin embutido do AGP 9 o KGP não está no classpath de build,
+// então o script não *compilaria* — e o Gradle morreria na fase de configuração, antes de
+// qualquer tarefa, apontando para a primeira tarefa do workflow em vez de apontar para a causa.
+//
+// O target 21 continua garantido pelo `compileOptions { source/targetCompatibility = VERSION_21 }`
+// acima, que o Kotlin embutido respeita. Ele é obrigatório: o SceneView e o `kotlin-math` dele
+// publicam funções `inline` em bytecode 21, e um target menor impede o app de chamá-las.
 
 // O modelo baixado entra como assets. Usamos `srcDir` + `dependsOn` em vez de
 // `addGeneratedSourceDirectory`: este é um download puro, sem output de task tipado do AGP,
