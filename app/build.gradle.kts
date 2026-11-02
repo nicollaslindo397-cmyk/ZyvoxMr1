@@ -14,12 +14,26 @@ import org.gradle.api.tasks.TaskAction
 
 plugins {
     alias(libs.plugins.android.application)
-    // Nem `org.jetbrains.kotlin.android` nem `org.jetbrains.kotlin.plugin.compose` aqui, e o
-    // motivo está em gradle.properties. Resumo: estamos no Kotlin embutido do AGP 9, que (a)
-    // proíbe explicitamente aplicar `org.jetbrains.kotlin.android` e (b) não traz o KGP para o
-    // classpath, e o plugin do compilador Compose é um subplugin do KGP — sem o KGP aplicado
-    // ele não tem onde se registrar. A compilação Kotlin e a transformação dos `@Composable`
-    // vêm do próprio AGP, habilitadas por `buildFeatures { compose = true }` abaixo.
+    // O plugin do compilador Compose, e SÓ ele.
+    //
+    // `org.jetbrains.kotlin.android` NÃO vai aqui: o AGP 9 tem Kotlin embutido e recusa esse
+    // plugin ("The 'org.jetbrains.kotlin.android' plugin is no longer required for Kotlin
+    // support since AGP 9.0"). Já `org.jetbrains.kotlin.plugin.compose` é um plugin Gradle
+    // separado, que o Kotlin embutido não fornece. Sem ele, `buildFeatures { compose = true }`
+    // aborta a configuração do projeto com:
+    //
+    //   Starting in Kotlin 2.0, the Compose Compiler Gradle plugin is required when compose
+    //   is enabled.
+    //
+    // Foi exatamente essa a falha que ocorreu aqui quando se tentou depender só do Kotlin
+    // embutido: o erro sai em `afterEvaluate`, então a mensagem aponta para "configuring
+    // project ':app'" e não para o plugin ausente.
+    //
+    // O JVM target 21 continua garantido por `compileOptions` abaixo — o Kotlin embutido deriva
+    // o jvmTarget de `targetCompatibility`, então não há bloco `kotlin { }` neste arquivo. Isso
+    // é importante: aquele bloco referencia `org.jetbrains.kotlin.gradle.dsl.JvmTarget`, classe
+    // do KGP, que não está no classpath neste modo e faria o script não compilar.
+    alias(libs.plugins.compose.compiler)
 }
 
 // ─── Modelo do MediaPipe Hand Landmarker ─────────────────────────────────────

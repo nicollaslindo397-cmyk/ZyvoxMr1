@@ -83,12 +83,23 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 #     `experimentalProperties[...]`, `splits { abi { isEnable } }`). Trocar de DSL para
 #     consertar um import quebrado seria trocar um erro de compilação por vários.
 #
-# A armadilha que levou a essa ida e volta, e que vale registrar: se você aplicar estes
-# plugins, o script de build ganha acesso a `org.jetbrains.kotlin.gradle.dsl.JvmTarget`. Se
-# você NÃO aplicar, referenciar essa classe faz o `build.gradle.kts` não compilar — e o Gradle
-# morre na fase de configuração, antes de qualquer tarefa. O erro aparece na primeira tarefa do
-# workflow (aqui, `:app:fetchHandModel`) e não menciona o script, o que manda você caçar no
-# lugar errado. O JVM target 21 deste projeto é expresso por `compileOptions`, que o Kotlin
-# embutido respeita.
+# A armadilha que levou a essa ida e volta, e que vale registrar: se você aplicar
+# `kotlin-android`, o script de build ganha acesso a
+# `org.jetbrains.kotlin.gradle.dsl.JvmTarget`. Se você NÃO aplicar, referenciar essa classe faz
+# o `build.gradle.kts` não compilar — e o Gradle morre na fase de configuração, antes de
+# qualquer tarefa. O erro aparece na primeira tarefa do workflow (aqui,
+# `:app:fetchDebugHandModel`) e não menciona o script, o que manda você caçar no lugar errado.
+# O JVM target 21 deste projeto é expresso por `compileOptions`: o Kotlin embutido deriva o
+# jvmTarget de `targetCompatibility`.
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+
+# ESTE é aplicado, e é obrigatório. O Kotlin embutido do AGP 9 compila os `.kt`, mas NÃO fornece
+# o compilador Compose: desde o Kotlin 2.0 ele vive num plugin Gradle separado. Sem isto,
+# `buildFeatures { compose = true }` aborta a configuração com "Starting in Kotlin 2.0, the
+# Compose Compiler Gradle plugin is required when compose is enabled".
+#
+# O guia de migração do Kotlin diz explicitamente: "If you're using AGP 9.0.0 or later, you no
+# longer need the org-jetbrains-kotlin-android plugin" — ou seja, fica este e não o de cima.
+# A versão é a do Kotlin por definição: o plugin do compilador Compose é versionado junto com o
+# KGP desde o Kotlin 2.0.
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
