@@ -155,14 +155,19 @@ jobs:
       # uma referência a `org.jetbrains.kotlin.gradle.dsl.JvmTarget` sem o KGP no classpath
       # apareceu como falha em `:app:fetchHandModel`.
 
-      # O `hand_landmarker.task` é baixado pela tarefa `fetchHandModel` do próprio build.
-      # Rodá-la primeiro separa "a rede falhou" de "o código não compila", que são dois
-      # problemas com donos diferentes.
+      # O `hand_landmarker.task` é baixado pela tarefa `fetch<Variant>HandModel` do próprio
+      # build, registrada por variant via `androidComponents.onVariants` — então NÃO existe mais
+      # uma tarefa chamada `fetchHandModel`, e pedir `:app:fetchHandModel` falha com
+      # "task not found" em vez de baixar o modelo.
+      #
+      # Rodá-la primeiro separa "a rede falhou" de "o código não compila", que são dois problemas
+      # com donos diferentes. Sem isto, uma falha de download apareceria dentro do
+      # `assembleDebug`, misturada com erros de compilação.
       - name: Baixar modelo do MediaPipe
         run: |
           set -o pipefail
           LOG="$RUNNER_TEMP/fetch-model.log"
-          gradle --no-daemon --continue --stacktrace :app:fetchHandModel 2>&1 | tee "$LOG"
+          gradle --no-daemon --continue --stacktrace :app:fetchDebugHandModel 2>&1 | tee "$LOG"
         shell: bash
 
       - name: Testes unitários

@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 #
-# Baixa o modelo do MediaPipe Hand Landmarker para o mesmo caminho que a tarefa Gradle
-# `fetchHandModel` usa.
+# Baixa o modelo do MediaPipe Hand Landmarker para os assets ESTÁTICOS do app, em
+# `app/src/main/assets/hand_landmarker.task`.
 #
 # Quando usar isto em vez de deixar o Gradle baixar sozinho:
 #   - você está offline no momento do build, mas tem como transferir o arquivo;
 #   - sua rede intercepta HTTPS (proxy corporativo) e o download do Gradle falha;
 #   - você quer inspecionar/verificar o modelo antes de colocá-lo no APK.
 #
-# O Gradle detecta o arquivo presente e pula o download (`onlyIf` na tarefa), então rodar
-# este script e depois buildar funciona normalmente.
+# Como o build reage a este arquivo: a tarefa `FetchHandModelTask` declara este caminho como
+# `@InputFile @Optional manualModel`. Quando o arquivo existe e não está vazio, a tarefa não
+# baixa nada e deixa o diretório gerado vazio de propósito. Isso é o que evita que os dois
+# caminhos produzam `hand_landmarker.task` e o merge de assets falhe com arquivo duplicado —
+# sem essa guarda, usar este fallback quebraria o build em vez de salvá-lo.
+#
+# ATENÇÃO: não aponte este script para `app/build/…`. O build não lê mais aquele caminho desde
+# que os assets gerados passaram a ser registrados por variant via
+# `addGeneratedSourceDirectory` (o AGP 9 proíbe `Provider` no SourceSet API). Escrever lá
+# produziria um download que ninguém empacota, e o APK sairia sem o modelo — uma falha silenciosa
+# que só aparece em runtime, com o hand tracking inativo.
 
 set -euo pipefail
 
@@ -20,7 +29,7 @@ URL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landma
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-OUT_DIR="$PROJECT_ROOT/app/build/generated/mediapipe-model"
+OUT_DIR="$PROJECT_ROOT/app/src/main/assets"
 OUT_FILE="$OUT_DIR/hand_landmarker.task"
 
 if [ -s "$OUT_FILE" ]; then

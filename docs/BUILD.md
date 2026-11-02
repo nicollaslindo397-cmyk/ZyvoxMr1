@@ -92,17 +92,25 @@ adb shell getprop ro.product.cpu.abi
 ## O modelo de hand tracking
 
 O `hand_landmarker.task` (~7 MB) **não** é versionado no repositório. Ele é baixado durante o
-build pela tarefa `fetchHandModel`, com cache local e verificação de tamanho — e entra no APK
-**sem compressão**, porque o MediaPipe o memory-maps em runtime (recomprimir quebra o
+build pela tarefa `fetch<Variant>HandModel` (`:app:fetchDebugHandModel`,
+`:app:fetchReleaseHandModel`), registrada por variant, com verificação de tamanho — e entra no
+APK **sem compressão**, porque o MediaPipe o memory-maps em runtime (recomprimir quebra o
 `createFromOptions`).
+
+Não existe uma tarefa chamada `fetchHandModel`. O registro é por variant porque os assets
+gerados passam por `variant.sources.assets.addGeneratedSourceDirectory`, que é a única forma que
+o AGP 9 aceita — ele proíbe `Provider` no SourceSet API (`assets.srcDir(provedor)`). O ganho é
+que o AGP passa a declarar o download como dependência de *todo* consumidor dos assets, em vez de
+cada um ter que ser ligado à mão.
 
 Caminho após o download:
 
 ```
-app/build/generated/mediapipe-model/hand_landmarker.task
+app/build/generated/mediapipe-model/<variant>/hand_landmarker.task
 ```
 
-Se sua rede bloqueia `storage.googleapis.com`, baixe à mão e coloque nesse mesmo caminho:
+Se sua rede bloqueia `storage.googleapis.com`, use `./scripts/fetch-hand-model.sh`, que baixa para
+os assets **estáticos**:
 
 ```bash
 ./scripts/fetch-hand-model.sh
@@ -121,7 +129,8 @@ experiência parcial e honesta do que uma tela preta.
 gradle :app:testDebugUnitTest
 
 # Só baixar o modelo, para separar "a rede falhou" de "o código não compila".
-gradle :app:fetchHandModel
+# É por variant: não existe `:app:fetchHandModel`.
+gradle :app:fetchDebugHandModel
 
 # Diagnóstico de latência do hand tracking com o aparelho ligado.
 adb logcat -s ZyvoxHandPerf
@@ -140,6 +149,6 @@ primeiro lugar para olhar quando algo parecer atrasado.
 | `Dependency … requires libraries not available in compileSdk 37` | Platform 37 não instalada | Rode o `sdkmanager` do passo 2 |
 | `Cannot access class … Java 21` ou erro apontando para o stdlib do Kotlin | JDK menor que 21 rodando o Gradle | `java -version`; ajuste `org.gradle.java.home` ou `JAVA_HOME` |
 | `./gradlew: No such file or directory` | Wrapper jar não versionado | Rode `gradle wrapper --gradle-version 9.8.2` uma vez |
-| Hand tracking inativo, HUD vermelho | Modelo ausente nos assets | `./scripts/fetch-hand-model.sh` ou `gradle :app:fetchHandModel` |
+| Hand tracking inativo, HUD vermelho | Modelo ausente nos assets | `./scripts/fetch-hand-model.sh` ou `gradle :app:fetchDebugHandModel` |
 | Tela preta com o dock aparecendo | `PreviewView` não recebeu frame | Confira a permissão de câmera e `adb logcat -s ZyvoxCamera` |
 | Instalação falha com `INSTALL_FAILED_OLDER_SDK` | Aparelho abaixo do Android 8.0 | `minSdk` é 26; não há suporte abaixo disso |

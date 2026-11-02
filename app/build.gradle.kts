@@ -1,5 +1,16 @@
-import java.net.URL
+import java.net.URI
 import java.security.MessageDigest
+import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
+import org.gradle.api.file.Directory
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     alias(libs.plugins.android.application)
@@ -14,43 +25,94 @@ plugins {
 // ─── Modelo do MediaPipe Hand Landmarker ─────────────────────────────────────
 // O `.task` é um bundle ZIP que o MediaPipe memory-maps em runtime. Ele não pode ser
 // versionado aqui (binário grande) nem comprimido no APK (ver `noCompress` abaixo).
-// Então o build o materializa num sourceSet de assets gerado, com cache local e
-// verificação de integridade.
+// Então o build o baixa e o registra como asset GERADO, por variant.
 //
 // Roda tanto no CI quanto na máquina do desenvolvedor. Offline, use
 // `scripts/fetch-hand-model.sh`, que escreve no mesmo caminho.
 val handModelUrl =
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
-val handModelDir = layout.buildDirectory.dir("generated/mediapipe-model")
-val handModelFile = handModelDir.map { it.file("hand_landmarker.task") }
 
-val fetchHandModel by tasks.registering {
-    description = "Baixa o hand_landmarker.task do MediaPipe para os assets gerados."
-    group = "build"
+/**
+ * Baixa o `hand_landmarker.task` para os assets gerados de um variant.
+ *
+ * ### Por que uma classe de task tipada, e não `tasks.register { doLast { … } }`
+ *
+ * Porque o AGP 9 **proíbe** `Provider` no SourceSet API. A forma anterior deste build era
+ *
+ * ```
+ * android.sourceSets["main"].assets.srcDir(handModelDir)   // handModelDir é Provider<Directory>
+ * ```
+ *
+ * e o Gradle abortava na configuração com "You cannot add Provider instances to the Android
+ * SourceSet API", apontando para `SourceDirectories.addGeneratedDirectory`. Essa API só aceita
+ * uma task tipada com uma propriedade de saída anotada — daí esta classe.
+ *
+ * Não é só burocracia. O comentário do demo do SceneView (`samples/android-demo/build.gradle`,
+ * que faz o mesmo para o CHANGELOG) explica o ganho real: registrando por
+ * `addGeneratedSourceDirectory`, o AGP passa a DONO do diretório de saída e declara o produtor
+ * como dependência de *todo* consumidor que ele gera. Uma entrada em `srcDirs` é invisível ao
+ * grafo de tarefas, então cada consumidor tem que ser ligado à mão — e aquele de que ninguém
+ * lembra, `lintVitalAnalyzeRelease`, só existe em release. Foi assim que quebrou o deploy deles
+ * na Play Store sem quebrar o CI de PR.
+ *
+ * A versão anterior deste arquivo tentava resolver isso com
+ * `tasks.matching { merge…Assets }.configureEach { dependsOn(…) }`, que é exatamente a
+ * ligação manual que o parágrafo acima descreve como frágil.
+ */
+abstract class FetchHandModelTask : DefaultTask() {
+    /** Declarado como `@Input` para o up-to-date check sobreviver a mudança de URL. */
+    @get:Input
+    abstract val modelUrl: Property<String>
 
-    inputs.property("url", handModelUrl)
-    // Saída declarada como DIRETÓRIO: é o contrato que `addGeneratedSourceDirectory`
-    // espera. O asset final fica em `assets/hand_landmarker.task` dentro do APK.
-    outputs.dir(handModelDir)
+    /**
+     * Diretório que vira raiz de assets. O AGP define um padrão via
+     * `addGeneratedSourceDirectory`, mas desde o AGP 8.12 isso é só um *default* — o que
+     * setamos aqui prevalece. Mantemos o caminho por variant para que `--continue` não veja
+     * duas tasks escrevendo no mesmo lugar.
+     */
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
 
-    // Propriedade nomeada para o wiring do AGP referenciar sem depender da posição do
-    // output na lista (`task.outputs.files` muda de ordem entre versões do AGP).
-    val outputDir = handModelDir
+    /**
+     * Modelo colocado à mão em `app/src/main/assets/` por `scripts/fetch-hand-model.sh`.
+     *
+     * Quando presente, esta task NÃO baixa e NÃO escreve nada em [outputDir]. Sem isso os dois
+     * caminhos produzem `hand_landmarker.task` e o merge de assets falha com arquivo duplicado —
+     * ou seja, usar o fallback offline quebraria o build em vez de salvá-lo.
+     *
+     * É `FileCollection` (e não `File`) para não capturar um `File` na configuração: o Gradle
+     * trata isso como dependência implícita não declarada.
+     */
+    @get:InputFile
+    @get:Optional
+    abstract val manualModel: RegularFileProperty
 
-    onlyIf {
-        val f = handModelFile.get().asFile
-        // `length() > 0` protege contra download anterior truncado: se ficou vazio, tenta
-        // de novo em vez de assumir que está pronto.
-        !(f.exists() && f.length() > 0L)
-    }
+    @TaskAction
+    fun fetch() {
+        // ── Fallback offline ──────────────────────────────────────────────────────────────
+        if (manualModel.isPresent) {
+            val manual = manualModel.get().asFile
+            if (manual.exists() && manual.length() > 0L) {
+                logger.lifecycle(
+                    "hand_landmarker.task já fornecido em ${manual.path} (${manual.length()} bytes); " +
+                        "download pulado e o diretório gerado fica vazio de propósito."
+                )
+                // Garante que o output declarado existe, mesmo vazio: o AGP registra este
+                // diretório como raiz de assets e um output inexistente quebra o up-to-date check.
+                outputDir.get().asFile.mkdirs()
+                return
+            }
+        }
 
-    doLast {
-        val f = handModelFile.get().asFile
-        f.parentFile.mkdirs()
-        val tmp = File(f.parentFile, f.name + ".part")
+        val outDir = outputDir.get().asFile
+        val target = File(outDir, "hand_landmarker.task")
+        target.parentFile.mkdirs()
+        val tmp = File(target.parentFile, target.name + ".part")
 
         logger.lifecycle("Baixando modelo do MediaPipe Hand Landmarker…")
-        val connection = URL(handModelUrl).openConnection()
+        // `URI(…).toURL()` e não `URL(String)`: o construtor está deprecado desde o Java 20
+        // e o build roda em JDK 21.
+        val connection = URI.create(modelUrl.get()).toURL().openConnection()
         connection.connectTimeout = 30_000
         connection.readTimeout = 120_000
         connection.getInputStream().use { input -> tmp.outputStream().use { output -> input.copyTo(output) } }
@@ -63,14 +125,14 @@ val fetchHandModel by tasks.registering {
             tmp.delete()
             throw GradleException(
                 "Download do modelo suspeito: ${bytes.size} bytes (esperado ~7 MB). " +
-                    "URL: $handModelUrl — verifique a rede ou use scripts/fetch-hand-model.sh."
+                    "URL: ${modelUrl.get()} — verifique a rede ou use scripts/fetch-hand-model.sh."
             )
         }
 
         val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         logger.lifecycle("hand_landmarker.task: ${bytes.size} bytes, sha256=$sha")
 
-        f.writeBytes(bytes)
+        target.writeBytes(bytes)
         tmp.delete()
     }
 }
@@ -176,13 +238,33 @@ android {
 // acima, que o Kotlin embutido respeita. Ele é obrigatório: o SceneView e o `kotlin-math` dele
 // publicam funções `inline` em bytecode 21, e um target menor impede o app de chamá-las.
 
-// O modelo baixado entra como assets. Usamos `srcDir` + `dependsOn` em vez de
-// `addGeneratedSourceDirectory`: este é um download puro, sem output de task tipado do AGP,
-// e o caminho simples tem menos superfície para quebrar entre versões do AGP.
-// `fetchHandModel` é incremental (declara outputs e tem `onlyIf`), então não re-baixa.
-android.sourceSets["main"].assets.srcDir(handModelDir)
-tasks.matching { it.name.contains("merge", ignoreCase = true) && it.name.contains("Assets") }
-    .configureEach { dependsOn(fetchHandModel) }
+// ─── Registro do modelo como asset gerado, por variant ──────────────────────────────────────
+// Substitui `android.sourceSets["main"].assets.srcDir(…)`, que o AGP 9 rejeita quando o
+// argumento é um `Provider` — ver a KDoc de [FetchHandModelTask] para o erro exato e para o
+// motivo de esta forma ser melhor que a ligação manual por `dependsOn` que havia antes.
+//
+// `layout` é capturado fora do lambda de propósito: dentro de `register<…> { }` o receptor é a
+// task, e resolver `layout` ali depende de a task não ter propriedade homônima. Capturar antes
+// remove essa ambiguidade em vez de confiar nela.
+val buildDir = layout.buildDirectory
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        val fetch = tasks.register<FetchHandModelTask>(
+            "fetch${variant.name.replaceFirstChar { it.uppercase() }}HandModel"
+        ) {
+            description = "Baixa o hand_landmarker.task do MediaPipe para os assets de ${variant.name}."
+            group = "build"
+            modelUrl.set(handModelUrl)
+            outputDir.set(buildDir.dir("generated/mediapipe-model/${variant.name}"))
+            // Fallback offline: se `scripts/fetch-hand-model.sh` já colocou o modelo nos assets
+            // estáticos, a task não baixa e não escreve nada — ver a KDoc de `manualModel`.
+            manualModel.set(file("src/main/assets/hand_landmarker.task"))
+        }
+        // `?.` porque `variant.sources.assets` é `SourceDirectories.Layered?` no DSL Kotlin,
+        // embora o demo do SceneView (Groovy) o chame sem null-check — Groovy não distingue.
+        variant.sources.assets?.addGeneratedSourceDirectory(fetch, FetchHandModelTask::outputDir)
+    }
+}
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))

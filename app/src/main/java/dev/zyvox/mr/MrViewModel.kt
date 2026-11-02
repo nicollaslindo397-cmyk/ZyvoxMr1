@@ -118,7 +118,9 @@ class MrViewModel(application: Application) : AndroidViewModel(application) {
         pipeline = created
         handTrackingAvailable = created.isAvailable
         if (!created.isAvailable) {
-            statusMessage = "Modelo de hand tracking ausente — rode ./gradlew :app:fetchHandModel"
+            statusMessage =
+                "Modelo de hand tracking ausente — rode ./gradlew :app:fetchDebugHandModel " +
+                    "ou ./scripts/fetch-hand-model.sh"
         }
         return created
     }
