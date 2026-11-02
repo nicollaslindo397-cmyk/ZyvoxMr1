@@ -32,6 +32,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# `contents: write` é o que permite ao job publicar o APK como asset de Release. Sem isto o
+# `GITHUB_TOKEN` é somente-leitura para conteúdo e o passo de Release falha com 403.
+permissions:
+  contents: write
+
 jobs:
   build:
     name: assembleDebug + testes
@@ -209,6 +214,41 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      # ── APK direto, sem zip e sem adb ────────────────────────────────────────────────────
+      #
+      # O artifact acima só é baixável logado e vem em zip, o que no navegador do celular é um
+      # caminho ruim. Aqui o mesmo APK vira asset de Release, que é um arquivo .apk direto.
+      #
+      # A tag é FIXA (`apk-latest`) e o asset tem nome fixo, então a URL de download nunca muda:
+      #   https://github.com/nicollaslindo397-cmyk/ZyvoxMr1/releases/download/apk-latest/zyvox-mr-debug.apk
+      # Cada build substitui o asset (`--clobber`). O preço é não haver histórico de APKs por
+      # build — aceitável, porque o histórico de código já está nas tags de commit e nos
+      # artifacts (30 dias), e o que se quer aqui é "o APK atual num link que não muda".
+      #
+      # `if: github.event_name == 'push'`: num pull_request o GITHUB_TOKEN é somente-leitura
+      # mesmo com `permissions`, e publicar o APK de um PR como "o APK" seria enganoso.
+      - name: Publicar APK na Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          TAG="apk-latest"
+
+          gh release create "$TAG" \
+            --title "APK debug (último build)" \
+            --notes "Build de \`${GITHUB_SHA}\`. Este asset é substituído a cada build verde." \
+            --target "$GITHUB_SHA" 2>/dev/null || true
+
+          # A nota é atualizada sempre, mesmo quando a Release já existia: sem isto ela ficaria
+          # apontando para o commit do dia em que a tag foi criada, o que é pior que não dizer.
+          gh release edit "$TAG" \
+            --notes "Build de \`${GITHUB_SHA}\` · [run ${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+
+          gh release upload "$TAG" "$APK#zyvox-mr-debug.apk" --clobber
+          echo "APK publicado: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/zyvox-mr-debug.apk"
 
       # Os logs completos, para quando as annotations não bastarem.
       - name: Publicar relatórios e logs (em falha)
