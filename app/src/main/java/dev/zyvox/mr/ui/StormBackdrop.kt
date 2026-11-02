@@ -102,7 +102,7 @@ fun StormBackdrop(modifier: Modifier = Modifier) {
         val flash = flashEnvelope(nowNs, flashStartNs)
         val sheet = sheetEnvelope(nowNs, sheetStartNs)
 
-        drawClouds(hPx, sheet, flash)
+        drawClouds(wPx, hPx, sheet, flash)
         drawRain(wPx, hPx, nowNs, pxPerDp, flash)
         if (flash > 0.001f) drawBolt(wPx, hPx, flashX, flash, pxPerDp)
         if (flash > 0.02f) drawFlash(flashX, flash)
@@ -136,23 +136,22 @@ private fun sheetEnvelope(nowNs: Long, startNs: Long): Float {
 
 // ─── Desenho ──────────────────────────────────────────────────────────────────────────────
 
-private fun DrawScope.drawClouds(hPx: Float, sheet: Float, flash: Float) {
+private fun DrawScope.drawClouds(wPx: Float, hPx: Float, sheet: Float, flash: Float) {
     val lift = (sheet + flash * 0.5f).coerceIn(0f, 1f)
     val alpha = (0.85f - lift * 0.45f).coerceIn(0f, 1f)
 
     // Gradiente desenhado no canvas nativo, em pixel, e não com `Brush.verticalGradient`.
     //
     // O motivo é concreto e não estilístico: as unidades de `startY`/`endY` do Compose são dp,
-    // e este escopo já trabalha em pixel (`wPx`/`hPx` vêm de `size * density`). Misturar os dois
-    // espaços num gradiente é como se produz uma faixa de nuvem que aparece no lugar errado só
-    // em aparelhos com densidade diferente da de desenvolvimento — um bug que o emulador nunca
-    // mostra. Aqui `drawRect` nativo e `hPx` estão no mesmo espaço, sem conversão nenhuma.
+    // e quem chama já trabalha em pixel (`wPx`/`hPx`). Misturar os dois espaços num gradiente
+    // produziria uma faixa de nuvem no lugar errado só em aparelhos com densidade diferente da
+    // de desenvolvimento — bug que o emulador nunca mostra. Aqui `drawRect` nativo, `wPx` e
+    // `hPx` estão todos no mesmo espaço, sem conversão nenhuma.
     //
-    // `pxPerDp` é capturado ANTES de entrar no lambda: dentro dele o receiver passa a ser
-    // `Canvas`, que tem a própria `density: Float` — escrever `density.density` ali resolve o
-    // primeiro `density` para o do Canvas e o segundo não existe em Float.
-    val pxPerDp = density.density
-    val rightPx = size.width * pxPerDp
+    // `wPx`/`hPx` vêm por PARÂMETRO, como em `drawRain` e `drawBolt`. Não derivar a densidade
+    // aqui dentro é deliberado: numa função de extensão `DrawScope.x` o `density` visível
+    // resolve para um `Float`, não para o objeto `Density` do lambda do Canvas, então
+    // `density.density` não compila neste escopo mesmo compilando no lambda do chamador.
     drawIntoCanvas { canvas ->
         cloudPaint.shader = LinearGradient(
             0f,
@@ -163,7 +162,7 @@ private fun DrawScope.drawClouds(hPx: Float, sheet: Float, flash: Float) {
             CLOUD_BASE.copy(alpha = 0f).toArgb(),
             Shader.TileMode.CLAMP,
         )
-        canvas.nativeCanvas.drawRect(0f, 0f, rightPx, hPx, cloudPaint)
+        canvas.nativeCanvas.drawRect(0f, 0f, wPx, hPx, cloudPaint)
     }
 }
 
