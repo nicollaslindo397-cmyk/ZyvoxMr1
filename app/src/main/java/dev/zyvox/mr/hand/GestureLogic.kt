@@ -43,6 +43,97 @@ fun pinchRatio(points: List<HandPoint>): Float? {
 const val MIN_PALM = 0.012f
 
 /**
+ * Grau de fechamento da mão: distância média das pontas dos dedos ao punho, normalizada pela
+ * palma (punho→MIDDLE_MCP).
+ *
+ * Normalizar pelo comprimento da palma é o que faz o gesto funcionar perto e longe da câmera,
+ * pelo mesmo motivo de [pinchRatio]: sem isso, afastar a mão encolheria todas as distâncias
+ * absolutas e uma mão aberta pareceria fechada.
+ *
+ * Usa só médio, anelar e mindinho — **exclui o indicador de propósito**. É isso que separa
+ * "mão fechada" de "pinch": no pinch o indicador estica em direção ao polegar enquanto os outros
+ * três dedos continuam estendidos, então a razão fica alta. Numa mão fechada os três se dobram e
+ * a razão cai. Incluir o indicador tornaria os dois gestos indistinguíveis, e o app precisa dos
+ * dois: pinch seleciona, mão fechada troca o fundo.
+ *
+ * Valores típicos medidos na geometria do modelo: mão aberta ~2.2–2.6, mão fechada ~1.0–1.4.
+ *
+ * @return `null` quando a palma é pequena demais para confiar, igual a [pinchRatio].
+ */
+fun fistRatio(points: List<HandPoint>): Float? {
+    val wrist = points.getOrNull(HandJoint.WRIST) ?: return null
+    val middleMcp = points.getOrNull(HandJoint.MIDDLE_MCP) ?: return null
+    val palm = hypot(middleMcp.x - wrist.x, middleMcp.y - wrist.y)
+    if (palm < MIN_PALM) return null
+
+    var sum = 0f
+    var n = 0
+    for (tip in FIST_TIPS) {
+        val p = points.getOrNull(tip) ?: continue
+        sum += hypot(p.x - wrist.x, p.y - wrist.y)
+        n++
+    }
+    if (n == 0) return null
+    return (sum / n / palm).coerceIn(0f, 4f)
+}
+
+/** Dedos considerados para [fistRatio]. Ver a KDoc: o indicador fica de fora de propósito. */
+private val FIST_TIPS = intArrayOf(
+    HandJoint.MIDDLE_TIP,
+    HandJoint.RING_TIP,
+    HandJoint.PINKY_TIP,
+)
+
+/**
+ * Limiar de mão fechada, com histerese.
+ *
+ * Dois limiares pelo mesmo motivo do pinch: com um só, uma mão relaxada oscilando em volta do
+ * corte faria o fundo da cena piscar entre câmera e tempestade várias vezes por segundo.
+ */
+const val FIST_CLOSE_BELOW = 1.55f
+const val FIST_OPEN_ABOVE = 1.80f
+
+/**
+ * Histerese de mão fechada, no mesmo formato de [PinchDetector].
+ *
+ * Estado simples e determinístico, sem Android — testável em JVM como o resto deste arquivo.
+ */
+class FistDetector(
+    private val closeBelow: Float = FIST_CLOSE_BELOW,
+    private val openAbove: Float = FIST_OPEN_ABOVE,
+    /** Quadros consecutivos exigidos para fechar. Filtra o quadro ruidoso que trocaria o fundo sozinho. */
+    private val closeFrames: Int = 2,
+) {
+    private var closed = false
+    private var pending = 0
+
+    val isFist: Boolean get() = closed
+
+    /** @param ratio saída de [fistRatio], ou `null` quando não é confiável neste quadro. */
+    fun update(ratio: Float?): Boolean {
+        if (ratio == null) return closed
+        if (closed) {
+            if (ratio > openAbove) {
+                closed = false
+                pending = 0
+            }
+        } else {
+            pending = if (ratio < closeBelow) pending + 1 else 0
+            if (pending >= closeFrames) {
+                closed = true
+                pending = 0
+            }
+        }
+        return closed
+    }
+
+    fun reset() {
+        closed = false
+        pending = 0
+    }
+}
+
+/**
  * Histerese de pinch: dois limiares em vez de um.
  *
  * Um limiar único faz o gesto "tremer" — a razão oscila em torno dele e o estado liga e
@@ -109,10 +200,26 @@ class PinchDetector(
  * Estado por mão, mantido pelo dono — ver [HandSlotAssigner].
  */
 class LandmarkSmoother(
-    private val minAlpha: Float = 0.18f,
-    private val maxAlpha: Float = 0.85f,
-    /** Deslocamento (em fração da tela) por quadro a partir do qual o filtro sai do caminho. */
-    private val fullSpeedAt: Float = 0.035f,
+    /**
+     * Alpha no repouso. Era 0.18f, e o custo era concreto: um filtro exponencial com alpha 0.18
+     * tem constante de tempo de ~1/0.18 ≈ 5,1 quadros, ou **~85 ms a 60 fps** de atraso só de
+     * suavização — antes de somar conversão YUV e inferência. É a maior fatia controlável do
+     * delay relatado no aparelho.
+     *
+     * 0.42f dá ~2,4 quadros ≈ 40 ms: corta o atraso pela metade e ainda remove o jitter do
+     * modelo, que é o que o filtro existe para fazer. Não subi além disso porque no repouso o
+     * jitter é máximo (é justamente quando o usuário mira em algo pequeno) e o filtro precisa
+     * atuar.
+     */
+    private val minAlpha: Float = 0.42f,
+    private val maxAlpha: Float = 0.92f,
+    /**
+     * Deslocamento (em fração da tela) por quadro a partir do qual o filtro sai do caminho.
+     * Era 0.035f: a mão precisava se mover 3,5% da tela num único quadro para o filtro afrouxar
+     * de vez, o que só acontece em movimento bem rápido. 0.020f faz o filtro abrir mão mais
+     * cedo, que é o que remove a sensação de "o cursor vem atrás da mão".
+     */
+    private val fullSpeedAt: Float = 0.020f,
 ) {
     private var x = Float.NaN
     private var y = Float.NaN

@@ -1,7 +1,9 @@
 package dev.zyvox.mr.spatial
 
+import android.os.SystemClock
 import android.util.Log
 import dev.zyvox.mr.dock.DockPanelView
+import dev.zyvox.mr.hand.HandFrame
 import dev.zyvox.mr.hand.TrackedHand
 import dev.zyvox.mr.ui.CursorPanelHost
 import dev.zyvox.mr.ui.DockPanelHost
@@ -54,6 +56,8 @@ class SpatialInputRouter(
     /**
      * @param cursorX/Y/Z posição do cursor no mundo, em metros.
      * @param hand a mão que controla o cursor, ou `null` se nenhuma está visível.
+     * @param frame o quadro completo. Os gestos globais olham a mão DIREITA nele, que pode não
+     *   ser a mesma que controla o cursor — ver [updateGlobalGestures].
      * @param windows estado atual das janelas (para achar o painel pelo id).
      */
     fun onFrame(
@@ -62,6 +66,7 @@ class SpatialInputRouter(
         cursorZ: Float,
         cursorValid: Boolean,
         hand: TrackedHand?,
+        frame: HandFrame,
         windows: List<MrWindow>,
     ) {
         val pinching = hand?.isPinching == true
@@ -78,6 +83,10 @@ class SpatialInputRouter(
             visible = cursorValid,
             pinching = pinching,
         )
+
+        // Antes dos early-returns abaixo, senão os gestos globais parariam de ser avaliados
+        // justamente quando não há mão no cursor — que é um dos casos em que precisam responder.
+        updateGlobalGestures(frame)
 
         // ── Sem mão, ou gesto solto: encerra tudo ─────────────────────────────────────────
         if (hand == null || !pinching) {
@@ -202,6 +211,72 @@ class SpatialInputRouter(
     /** Ação do dock disparada pelo gesto da mão. Ligado pelo dono da cena. */
     var onDockAction: ((DockPanelView.Action) -> Unit)? = null
 
+    /** Mostra/oculta a interface. Disparado por pinch da mão direita no espaço vazio. */
+    var onToggleDock: (() -> Unit)? = null
+
+    /** Alterna o fundo entre a câmera e o ambiente virtual. Disparado por mão direita fechada. */
+    var onToggleBackground: (() -> Unit)? = null
+
+    // ── Gestos globais da mão direita ────────────────────────────────────────────────────
+    //
+    // Por que a mão direita e não "a mão do cursor": o cursor é a mão que o usuário aponta, e
+    // se os dois papéis fossem da mesma mão não haveria como distinguir "quero clicar nisso" de
+    // "quero esconder a interface". Separar em mão esquerda = ponteiro, mão direita = controle é
+    // o que torna os dois gestos possíveis sem ambiguidade.
+    //
+    // Por que `isRightHand` vem da posição no quadro e não do rótulo do MediaPipe: ver a KDoc de
+    // [TrackedHand]. Em resumo, o rótulo assume imagem espelhada e oscila quando a mão vira.
+
+    private var rightPinchWasActive = false
+    private var rightFistWasActive = false
+    private var lastDockToggleNs = 0L
+    private var lastBackgroundToggleNs = 0L
+
+    /**
+     * Pinch da mão direita **no espaço vazio** esconde/mostra a interface; mão direita fechada
+     * troca o fundo.
+     *
+     * ### Por que "no espaço vazio"
+     * Pinch já é o gesto de selecionar. Se a mão direita fechasse a interface a cada pinch, não
+     * seria mais possível usar a mão direita para tocar num botão do dock ou numa janela.
+     * Restringir ao caso em que o pinch não acertou alvo nenhum resolve o conflito sem inventar
+     * gesto: `Target.NONE` era literalmente `Unit` — um pinch no vazio não fazia nada antes.
+     *
+     * ### Por que edge-triggered com cooldown
+     * `onFrame` roda ~60×/s e o estado do gesto dura vários quadros. Disparar por nível em vez
+     * de por borda esconderia e reexibiria a interface dezenas de vezes no mesmo gesto. E o
+     * cooldown cobre um caso que a borda sozinha não cobre: se a mão some do quadro por um
+     * instante (oclusão, inferência que perdeu o frame), `right` vira `null` e o estado anterior
+     * reseta para `false` — sem cooldown, reaparecer ainda pinçando contaria como uma segunda
+     * borda de subida e desfaria a ação.
+     */
+    private fun updateGlobalGestures(frame: HandFrame) {
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        val right = frame.hands.firstOrNull { it.isRightHand }
+
+        val fistActive = right?.isFist == true
+        if (fistActive && !rightFistWasActive &&
+            nowNs - lastBackgroundToggleNs > GESTURE_COOLDOWN_NS
+        ) {
+            lastBackgroundToggleNs = nowNs
+            onToggleBackground?.invoke()
+        }
+        rightFistWasActive = fistActive
+
+        // `activeTarget == Target.NONE` é o "não acertou nada": nem dock, nem título, nem alça,
+        // nem corpo de janela. É avaliado no instante da subida do pinch, que é quando
+        // `beginGesture` já decidiu o alvo.
+        val pinchActive = right != null && right.isPinching && !right.isFist &&
+            activeTarget == Target.NONE
+        if (pinchActive && !rightPinchWasActive &&
+            nowNs - lastDockToggleNs > GESTURE_COOLDOWN_NS
+        ) {
+            lastDockToggleNs = nowNs
+            onToggleDock?.invoke()
+        }
+        rightPinchWasActive = pinchActive
+    }
+
     private fun panelOf(id: String?): WindowPanelRecord? =
         id?.let { windowHost.panel(it) }
 
@@ -264,10 +339,24 @@ class SpatialInputRouter(
         if (activeTarget != Target.NONE) releaseGesture()
         windowController.endGesture()
         windowController.clearHover()
+        // O estado de borda dos gestos globais também. Sem isto, desfazer a cena com a mão
+        // fechada e refazê-la já aberta contaria como uma subida falsa e trocaria o fundo.
+        rightPinchWasActive = false
+        rightFistWasActive = false
     }
 
     companion object {
         private const val TAG = "ZyvoxInputRouter"
+
+        /**
+         * Intervalo mínimo entre dois disparos do mesmo gesto global.
+         *
+         * 600 ms: longo o bastante para um gesto trêmulo não disparar duas vezes, curto o
+         * bastante para o usuário poder esconder e reexibir a interface em sequência sem sentir
+         * que o app ignorou o segundo gesto. Ver [updateGlobalGestures] para o caso de oclusão
+         * que a detecção de borda sozinha não cobre.
+         */
+        private const val GESTURE_COOLDOWN_NS = 600_000_000L
 
         /** Log de diagnóstico: liga com `adb shell setprop log.tag.ZyvoxInputRouter VERBOSE`. */
         fun debugEnabled(): Boolean = Log.isLoggable(TAG, Log.VERBOSE)

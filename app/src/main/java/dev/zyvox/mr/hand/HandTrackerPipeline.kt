@@ -75,6 +75,7 @@ class HandTrackerPipeline(
      * compartilhar um detector faria a mão esquerda "herdar" o pinch da direita.
      */
     private val pinchDetectors = List(maxHands) { PinchDetector() }
+    private val fistDetectors = List(maxHands) { FistDetector() }
     private val smoothers = List(maxHands) { LandmarkSmoother() }
 
     private val landmarker: HandLandmarker? = runCatching {
@@ -261,7 +262,24 @@ class HandTrackerPipeline(
             val (sx, sy) = smoothers[slot].update(palm.x, palm.y)
 
             val ratio = pinchRatio(points)
-            val pinching = pinchDetectors[slot].update(ratio)
+            // Mão fechada ANTES de pinch, e o pinch é suprimido enquanto ela durar.
+            //
+            // Não é redundância: numa mão fechada o polegar dobra sobre o indicador, então
+            // `pinchRatio` cai junto e o pinch dispara. Sem esta guarda, o gesto de trocar o
+            // fundo (mão fechada) esconderia a interface ao mesmo tempo — dois efeitos para uma
+            // intenção, e o usuário leria como bug. [fistRatio] exclui o indicador de propósito
+            // justamente para separar os dois gestos; aqui a ordem fecha o resto.
+            //
+            // Passar `null` ao detector de pinch (e não 1.0f) é deliberado: na KDoc de
+            // `PinchDetector.update`, `null` mantém o estado em vez de cancelá-lo, então um
+            // pinch que estava ativo no quadro anterior não é derrubado por um único quadro em
+            // que a mão começou a fechar.
+            val fist = fistDetectors[slot].update(fistRatio(points))
+            val pinching = if (fist) {
+                pinchDetectors[slot].update(null)
+            } else {
+                pinchDetectors[slot].update(ratio)
+            }
 
             val wrist = points[HandJoint.WRIST]
             val middleMcp = points[HandJoint.MIDDLE_MCP]
@@ -280,6 +298,18 @@ class HandTrackerPipeline(
                 viewY = sy,
                 pinchRatio = ratio ?: Float.NaN,
                 isPinching = pinching,
+                isFist = fist,
+                // Lado do quadro, não o rótulo do MediaPipe.
+                //
+                // `handedness` do modelo assume imagem ESPELHADA (convenção de câmera frontal);
+                // na traseira, que não é espelhada, o rótulo sai invertido. Pior: ele oscila
+                // quando a mão vira, o que faria o gesto trocar de mão no meio do movimento.
+                //
+                // A posição no quadro é estável e é o que o usuário de fato vê: a câmera traseira
+                // aponta para onde você olha, então sua mão direita aparece no lado direito da
+                // imagem, como num espelho não-invertido. `viewX` é a palma suavizada em
+                // coordenada normalizada upright (0..1).
+                isRightHand = sx > 0.5f,
                 handScale = handScale,
                 trackingScore = category?.score() ?: 0f,
             )
@@ -296,6 +326,7 @@ class HandTrackerPipeline(
     /** Reinicia o estado de gesto — usado quando o tracking é perdido por muito tempo. */
     fun resetGestures() {
         pinchDetectors.forEach { it.reset() }
+        fistDetectors.forEach { it.reset() }
         smoothers.forEach { it.reset() }
         slot.releaseAny()
     }

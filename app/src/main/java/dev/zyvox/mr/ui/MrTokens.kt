@@ -123,4 +123,23 @@ object MrTokens {
     const val DOCK_SCALE_MIN = 0.8f
     const val DOCK_SCALE_MAX = 2.2f
     const val DOCK_SCALE_STEP = 0.15f
+
+    /**
+     * Fração da **largura visível** que o dock ocupa, na escala 1.0.
+     *
+     * O dock não tem mais uma largura fixa em metros — ele é medido contra o que a câmera
+     * realmente enxerga na profundidade dele. [DOCK_WIDTH_M] virou só o valor de partida antes
+     * da primeira medição.
+     *
+     * O motivo é que metros absolutos não significam nada sem conhecer o campo de visão: o mesmo
+     * 0,34 m pode ocupar metade da tela num aparelho e transbordar noutro, e a largura visível
+     * depende de FOV, proporção e orientação — nada disso é constante entre celulares. Ancorar
+     * numa fração do visível é o que faz o dock ter o mesmo tamanho APARENTE em qualquer
+     * aparelho, que é o que o usuário de fato percebe.
+     *
+     * 0.92 preenche a largura sem tocar as bordas. Não é "preencher a tela": o dock continua
+     * sendo uma faixa fina, e o requisito original é que ele não ocupe a tela inteira — o que
+     * decide isso é a altura, não a largura.
+     */
+    const val DOCK_WIDTH_FRACTION = 0.92f
 }

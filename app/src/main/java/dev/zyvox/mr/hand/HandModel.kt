@@ -65,6 +65,8 @@ data class HandPoint(
  * @param pinchRatio Distância polegar-indicador normalizada pelo tamanho da mão.
  *   Adimensional: funciona perto e longe da câmera.
  * @param isPinching Estado do gesto **com histerese aplicada**.
+ * @param isFist Estado da mão fechada, também com histerese. Ver [FistDetector].
+ * @param isRightHand `true` quando a mão está no lado direito do quadro.
  * @param handScale Distância punho→MIDDLE_MCP em coordenada normalizada. Serve tanto
  *   como denominador do [pinchRatio] quanto como proxy grosseiro de proximidade.
  */
@@ -77,6 +79,8 @@ data class TrackedHand(
     val viewY: Float,
     val pinchRatio: Float,
     val isPinching: Boolean,
+    val isFist: Boolean,
+    val isRightHand: Boolean,
     val handScale: Float,
     val trackingScore: Float,
 ) {

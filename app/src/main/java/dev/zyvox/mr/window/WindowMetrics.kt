@@ -40,11 +40,18 @@ object WindowMetrics {
     /** Altura útil do WebView em pixels. */
     const val WEB_HEIGHT_PX = CONTENT_HEIGHT_PX - TITLE_BAR_PX
 
-    /** Largura da janela no mundo, em metros. */
-    const val WINDOW_WIDTH_M = 0.64f
+    /**
+     * Largura da janela no mundo, em metros.
+     *
+     * Aponta para [MrWindow.DEFAULT_WIDTH] em vez de repetir o número. Eram dois `0.64f`
+     * independentes em dois arquivos; quando a largura padrão subiu para 0,82 os dois teriam
+     * divergido em silêncio, e [PX_PER_UNITS] — derivado daqui — passaria a descrever uma janela
+     * que não existe mais. É o mesmo acoplamento que fez o dock encolher.
+     */
+    const val WINDOW_WIDTH_M = MrWindow.DEFAULT_WIDTH
 
-    /** Altura da janela no mundo, em metros. */
-    const val WINDOW_HEIGHT_M = 0.40f
+    /** Altura da janela no mundo, em metros. Derivada, nunca um literal. */
+    const val WINDOW_HEIGHT_M = MrWindow.DEFAULT_HEIGHT
 
     /**
      * `pxPerUnits` que faz o quad medir [WINDOW_WIDTH_M] × [WINDOW_HEIGHT_M] com

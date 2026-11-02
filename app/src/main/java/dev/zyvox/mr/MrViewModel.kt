@@ -221,6 +221,46 @@ class MrViewModel(application: Application) : AndroidViewModel(application) {
         dockVisible = !dockVisible
     }
 
+    // ─── Fundo da experiência ───────────────────────────────────────────────────────────
+
+    /** O que aparece atrás dos painéis. Ver [toggleBackground]. */
+    enum class BackgroundMode {
+        /** Passthrough: o vídeo da câmera traseira, que é o modo padrão de um app de MR. */
+        CAMERA,
+
+        /** Ambiente virtual: céu de tempestade com chuva e relâmpago, desenhado pelo app. */
+        STORM,
+    }
+
+    var backgroundMode by mutableStateOf(BackgroundMode.CAMERA)
+        private set
+
+    /**
+     * Alterna entre a câmera e o ambiente de tempestade. Disparado por mão direita fechada.
+     *
+     * ### A câmera continua ligada nos dois modos
+     * Isto é o ponto fácil de errar: trocar o fundo **não** pode fechar a câmera. O hand
+     * tracking é alimentado pelo `ImageAnalysis` da mesma câmera que produz o passthrough, então
+     * desligá-la para mostrar a tempestade mataria todo o rastreamento de mãos no modo virtual —
+     * justamente o modo em que o usuário mais precisa dele, porque sem o vídeo do mundo real a
+     * única forma de interagir é a mão.
+     *
+     * O que muda é só o que se DESENHA: a camada de tempestade é pintada por cima do
+     * `PreviewView`. O `PreviewView` continua na árvore de composição (removê-lo desfaria o
+     * `DisposableEffect` que faz o bind da câmera) e continua recebendo quadros; apenas fica
+     * coberto.
+     */
+    fun toggleBackground() {
+        backgroundMode = when (backgroundMode) {
+            BackgroundMode.CAMERA -> BackgroundMode.STORM
+            BackgroundMode.STORM -> BackgroundMode.CAMERA
+        }
+        statusMessage = when (backgroundMode) {
+            BackgroundMode.CAMERA -> "Fundo: câmera (passthrough)"
+            BackgroundMode.STORM -> "Fundo: tempestade"
+        }
+    }
+
     /**
      * Copia o estado imutável do [stack] para a lista observável.
      *

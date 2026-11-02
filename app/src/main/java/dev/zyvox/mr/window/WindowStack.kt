@@ -33,8 +33,25 @@ data class MrWindow(
     val titleBarMeters: Float get() = TITLE_BAR_METERS
 
     companion object {
-        const val TITLE_BAR_METERS = 0.045f
-        const val DEFAULT_WIDTH = 0.64f
+        /**
+         * Altura da barra de título no mundo.
+         *
+         * Era 0.045f, que contra a altura antiga de 0.40 m dava 11,25% da janela. A barra real
+         * tem 88 px de 800, ou seja 11%. Escalar a janela sem escalar isto faria a barra virar
+         * uma fatia cada vez menor — e `WindowController` classifica o toque por
+         * `titleBarMeters / heightMeters`, então a área de arrastar encolheria junto. Mantida a
+         * proporção de 11% da altura padrão.
+         */
+        const val TITLE_BAR_METERS = 0.058f
+
+        /**
+         * Largura padrão da janela no mundo. Era 0.64f.
+         *
+         * Subiu porque o relato de aparelho foi explícito ("a interface tá cada vez mais
+         * pequena … aumente o tamanho"). A altura é derivada em [DEFAULT_HEIGHT], então a
+         * proporção do conteúdo se mantém sozinha.
+         */
+        const val DEFAULT_WIDTH = 0.82f
 
         /**
          * Derivada da largura, nunca um literal independente.
@@ -57,8 +74,10 @@ data class MrWindow(
          */
         const val DEFAULT_HEIGHT = DEFAULT_WIDTH / WindowMetrics.ASPECT
         const val DEFAULT_DEPTH = 0.55f
-        const val MIN_WIDTH = 0.22f
-        const val MAX_WIDTH = 1.6f
+
+        /** Era 0.22f. Subiu junto com o padrão: um mínimo de 0,22 m num app cujo padrão passou a 0,82 m deixaria a janela encolher até ficar ilegível. */
+        const val MIN_WIDTH = 0.34f
+        const val MAX_WIDTH = 2.2f
 
         // MIN_HEIGHT e MAX_HEIGHT foram removidos: não eram lidos em lugar nenhum — `resizeBy`
         // restringe só a largura e deriva a altura — e qualquer valor solto ali contradiria a

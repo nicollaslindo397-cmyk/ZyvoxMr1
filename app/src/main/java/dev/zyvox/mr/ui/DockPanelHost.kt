@@ -43,8 +43,12 @@ class DockPanelHost(
 
     private val windowManager = ViewNode.WindowManager(materialLoader.context)
 
-    /** Escala vigente, para [applyScale] não reescrever `pxPerUnits` à toa. */
+    // Declarados ANTES de `node` e do `init` de propósito: em Kotlin os inicializadores de
+    // propriedade e os blocos `init` rodam na ordem em que aparecem no corpo da classe. O `init`
+    // chama `applyScale`, que chama `layout()`, que lê estes dois campos — se estivessem
+    // declarados depois, `layout()` leria zeros e o dock nasceria com `pxPerUnits` infinito.
     private var currentScale = 0f
+    private var visibleWidthM = 0f
 
     val node: ViewNode = ViewNode(
         engine = engine,
@@ -57,13 +61,16 @@ class DockPanelHost(
     /**
      * Largura **efetiva** do dock no mundo, já com a escala do usuário aplicada.
      *
+     * É derivada, não armazenada: se fosse um campo escrito por [layout], haveria duas fontes de
+     * verdade que poderiam divergir em silêncio, e divergência aqui significa o toque ser
+     * registrado num botão enquanto a ação disparada é a de outro.
+     *
      * Tudo que precisa saber onde o dock termina — teste de contenção, mapeamento de toque,
      * divisão dos botões no [dev.zyvox.mr.spatial.SpatialInputRouter] — tem de ler daqui, nunca
-     * de [MrTokens.DOCK_WIDTH_M]. Aquela é a base; esta é a verdade em uso. Ler a base depois
-     * que a escala existe faz o toque ser registrado num botão e a ação sair de outro.
+     * de [MrTokens.DOCK_WIDTH_M].
      */
-    var worldWidthM: Float = MrTokens.DOCK_WIDTH_M
-        private set
+    val worldWidthM: Float
+        get() = (if (visibleWidthM > 0f) visibleWidthM else MrTokens.DOCK_WIDTH_M) * currentScale
 
     /** Altura efetiva no mundo. Derivada da largura pela proporção fixa da view em pixel. */
     val worldHeightM: Float
@@ -79,8 +86,20 @@ class DockPanelHost(
     }
 
     /**
-     * Redimensiona o dock. Idempotente e barato: só reescreve `pxPerUnits` quando a escala
-     * mudou de fato, porque esse setter remeide a superfície do `ViewNode`.
+     * Largura do campo de visão na profundidade do dock, medida pelo dono da cena.
+     *
+     * Ver [applyScale] para por que o tamanho é uma fração disto e não um número fixo em metros.
+     */
+    fun applyVisibleWidth(widthM: Float) {
+        if (!widthM.isFinite() || widthM <= 0f) return
+        if (widthM == visibleWidthM) return
+        visibleWidthM = widthM
+        layout()
+    }
+
+    /**
+     * Redimensiona o dock. Idempotente e barato: só reescreve `pxPerUnits` quando algo mudou de
+     * fato, porque esse setter remeide a superfície do `ViewNode`.
      *
      * Escalar por `pxPerUnits` (e não por `node.scale`) é o que mantém o conteúdo nítido:
      * `pxPerUnits` muda quantos metros a view de pixel ocupa, então o texto é rasterizado de
@@ -92,8 +111,14 @@ class DockPanelHost(
         val clamped = scale.coerceIn(MrTokens.DOCK_SCALE_MIN, MrTokens.DOCK_SCALE_MAX)
         if (clamped == currentScale) return
         currentScale = clamped
-        worldWidthM = MrTokens.DOCK_WIDTH_M * clamped
-        node.pxPerUnits = DockPanelView.DOCK_WIDTH_PX / worldWidthM
+        layout()
+    }
+
+    /** Aplica o tamanho efetivo ao `ViewNode`. Único lugar que escreve `pxPerUnits`. */
+    private fun layout() {
+        val width = worldWidthM
+        if (width <= 0f) return
+        node.pxPerUnits = DockPanelView.DOCK_WIDTH_PX / width
     }
 
     fun setVisible(visible: Boolean) {

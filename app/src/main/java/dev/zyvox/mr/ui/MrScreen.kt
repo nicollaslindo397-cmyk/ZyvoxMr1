@@ -164,6 +164,16 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
     var uprightWidth by remember { mutableStateOf(0) }
     var uprightHeight by remember { mutableStateOf(0) }
 
+    /**
+     * Viewport para o qual a largura visível do dock já foi medida.
+     *
+     * Estado do Compose, não campo solto: o `onFrame` roda fora da composição, e escrever em
+     * estado aqui só acontece quando o viewport muda de fato (rotação, multijanela), nunca por
+     * quadro. Ver a medição em `onFrame` para por que cachear é correto e não apenas econômico.
+     */
+    var dockFitWidth by remember { mutableStateOf(0) }
+    var dockFitHeight by remember { mutableStateOf(0) }
+
     // Estado das janelas (observável: muda raramente).
     val windows = viewModel.windows
 
@@ -209,14 +219,30 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
         }
     }
 
+    // Lido aqui, e não dentro do Box, para que a mudança de fundo recomponha esta camada.
+    val backgroundMode = viewModel.backgroundMode
+
     Box(modifier = Modifier.fillMaxSize()) {
         // 1. Passthrough.
+        //
+        // Fica na árvore nos DOIS modos de fundo, inclusive na tempestade. Removê-lo aqui
+        // desfaria o `DisposableEffect` que faz o bind da câmera, e o `ImageAnalysis` que
+        // alimenta o hand tracking morreria junto — o modo virtual ficaria sem rastreamento de
+        // mãos, que é justamente a única forma de interagir quando não há vídeo do mundo real.
+        // Então a câmera segue rodando e apenas fica coberta pela camada 2.
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { previewView },
             modifier = Modifier.fillMaxSize(),
         )
 
-        // 2. Cena 3D transparente.
+        // 2. Ambiente virtual, quando escolhido. Cobre o passthrough por completo: é opaco de
+        // propósito, porque um céu de tempestade com o vídeo da câmera vazando por baixo não lê
+        // como ambiente, lê como defeito.
+        if (backgroundMode == MrViewModel.BackgroundMode.STORM) {
+            StormBackdrop()
+        }
+
+        // 3. Cena 3D transparente.
         SceneView(
             modifier = Modifier
                 .fillMaxSize()
@@ -254,11 +280,42 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
                 // ── Sincroniza painéis com o estado ───────────────────────────────────────
                 wHost.sync(windows)
                 dHost.setVisible(viewModel.dockVisible)
+
+                // ── Mede o campo de visão na profundidade do dock ─────────────────────────
+                //
+                // O dock passa a ocupar uma FRAÇÃO do que a câmera enxerga na profundidade dele,
+                // em vez de um número fixo em metros. Metros absolutos não significam nada sem
+                // conhecer o FOV: os mesmos 0,34 m podem ocupar metade da tela num aparelho e
+                // transbordar noutro, e o FOV muda com aparelho, proporção e orientação. Foi
+                // exatamente isso que fez a interface parecer "cada vez menor" — o tamanho em
+                // pixel do dock subiu de 1120 para 1400 enquanto a largura em metros ficou em
+                // 0,34, então cada botão encolheu de 6,8 para 4,25 cm sem que nada avisasse.
+                //
+                // Custa duas `screenToWorld`, mas só quando o viewport muda: a câmera é 3DoF
+                // (só escrevemos `quaternion`, nunca `position`), e rotação é transformação
+                // rígida — preserva distância entre pontos do mundo. Então a largura visível a
+                // uma profundidade fixa NÃO depende da orientação da cabeça, e cachear por
+                // tamanho de viewport é correto, não apenas econômico.
+                if (dockFitWidth != viewWidthPx || dockFitHeight != viewHeightPx) {
+                    val midY = viewHeightPx / 2f
+                    val left = filamentView.screenToWorld(0f, midY, NEAR_SAMPLE_Z)
+                    val right = filamentView.screenToWorld(viewWidthPx.toFloat(), midY, NEAR_SAMPLE_Z)
+                    if (left != null && right != null) {
+                        val dx = right.x - left.x
+                        val dy = right.y - left.y
+                        val dz = right.z - left.z
+                        val width = sqrt(dx * dx + dy * dy + dz * dz)
+                        if (width.isFinite() && width > 1e-4f) {
+                            dockFitWidth = viewWidthPx
+                            dockFitHeight = viewHeightPx
+                            dHost.applyVisibleWidth(width * MrTokens.DOCK_WIDTH_FRACTION)
+                        }
+                    }
+                }
+
                 // A escala do dock é aplicada aqui, não num `LaunchedEffect(dockScale)`: o
                 // `applyScale` é idempotente e só reescreve `pxPerUnits` quando o valor mudou de
-                // fato, então o custo por frame é uma comparação de float. Fazer por efeito
-                // funcionaria, mas dividiria em dois lugares a regra de "quando o dock muda de
-                // tamanho" — e este já é o ponto onde todo o resto do estado espacial é aplicado.
+                // fato, então o custo por frame é uma comparação de float.
                 dHost.applyScale(viewModel.dockScale)
 
                 // ── Projeção do cursor ────────────────────────────────────────────────────
@@ -368,6 +425,9 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
                     cursorZ = cz,
                     cursorValid = cursorValid,
                     hand = hand,
+                    // O quadro inteiro, não só a mão do cursor: os gestos globais olham a mão
+                    // DIREITA, que pode não ser a mesma que o `firstOrNull()` acima escolheu.
+                    frame = viewModel.latestHandFrame,
                     windows = windows,
                 )
             },
@@ -381,7 +441,7 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
             Node(apply = { sceneRoot.value = this })
         }
 
-        // 3. Esqueleto da mão, sobre o passthrough e sobre a cena.
+        // 4. Esqueleto da mão, sobre o fundo (câmera ou tempestade) e sobre a cena.
         //
         // Acima do `SceneView` de propósito: as "cordinhas" descrevem a mão real, que está no
         // vídeo. Se ficassem abaixo da cena, uma janela WebView aberta cobriria o esqueleto e o
@@ -392,7 +452,7 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
             imageHeight = uprightHeight,
         )
 
-        // 4. HUD 2D.
+        // 5. HUD 2D.
         MrHud(viewModel = viewModel)
     }
 
@@ -446,6 +506,11 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
             // compilador responde "'val' cannot be reassigned". Os dois lados da mesma expressão
             // apontavam para coisas diferentes. Aqui, `inputRouter.` e o nome simples são inequívocos.
             inputRouter.onDockAction = onDockAction
+            // Os dois gestos globais da mão direita. Ver `updateGlobalGestures` no router para o
+            // porquê de pinch valer só no espaço vazio: sem essa restrição não haveria como usar
+            // a mão direita para tocar num botão, porque todo pinch esconderia a interface.
+            inputRouter.onToggleDock = { viewModel.toggleDock() }
+            inputRouter.onToggleBackground = { viewModel.toggleBackground() }
 
             windowHost = wHost
             dockHost = dHost

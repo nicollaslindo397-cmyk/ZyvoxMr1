@@ -13,13 +13,30 @@
     <string name="status_initializing">Iniciando câmera…</string>
     <string name="status_no_model">Modelo de hand tracking ausente — veja BUILD.md</string>
     <!--
-      Diz ONDE pôr a mão, porque com câmera traseira isso não é óbvio: a mão que segura o
-      aparelho fica do lado da tela, onde a câmera não vê. A mensagem anterior ("Mostre as duas
-      mãos para a câmera") não resolvia — o usuário olhava a tela e não entendia por que nada
-      acontecia.
+      Diz ONDE pôr a mão, porque com câmera traseira isso não é óbvio e é o contrário do
+      instinto: a mão que segura o aparelho fica do lado da tela, onde a câmera não vê.
+
+      A versão anterior desta string dizia "entre ele e você", o que estava ERRADO e pior que
+      não dizer nada: a câmera traseira aponta para LONGE de quem segura o aparelho, então uma
+      mão entre o celular e o rosto fica atrás da câmera e nunca aparece. Estender o braço é o
+      movimento certo.
     -->
-    <string name="status_show_hands">Ponha a mão à frente do aparelho, entre ele e você — a câmera é a traseira</string>
+    <string name="status_show_hands">Estenda o braço: a mão precisa estar ALÉM do aparelho, do lado oposto à tela</string>
     <string name="status_tracking">Rastreando %1$d mão(s)</string>
+
+    <!--
+      Controles de fallback do HUD. Todos existem também como gesto de mão; estão aqui porque
+      um recurso que só funciona quando o rastreamento funciona não é testável.
+    -->
+    <string name="hud_background">Fundo</string>
+    <string name="hud_dock_smaller">Dock −</string>
+    <string name="hud_dock_bigger">Dock +</string>
+
+    <!--
+      Documenta os gestos globais. São invisíveis por natureza — nada na tela indica que
+      existem — então sem esta linha o usuário nunca os descobriria.
+    -->
+    <string name="hud_gesture_hint">Mão direita: pinch no vazio = dock · mão fechada = fundo</string>
 
     <!-- Dock -->
     <string name="dock_toggle">Mostrar/ocultar dock</string>

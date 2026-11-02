@@ -104,7 +104,7 @@ class DockPanelView(context: Context) : FrameLayout(context) {
             TextView(context).apply {
                 text = glyph
                 setTextColor(GLYPH_COLOR)
-                textSize = 40f
+                textSize = GLYPH_TEXT_SP
                 gravity = Gravity.CENTER
             }
         )
@@ -112,9 +112,13 @@ class DockPanelView(context: Context) : FrameLayout(context) {
             TextView(context).apply {
                 text = label
                 setTextColor(LABEL_COLOR)
-                textSize = 18f
+                textSize = LABEL_TEXT_SP
                 gravity = Gravity.CENTER
                 maxLines = 1
+                // Negrito de propósito. O rótulo é lido através de um painel 3D comprimido em
+                // textura, sobre um passthrough que pode ser claro; texto fino nesse caminho
+                // some. É a diferença entre um dock legível e um dock decorativo.
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
             }
         )
         return cell
@@ -181,8 +185,25 @@ class DockPanelView(context: Context) : FrameLayout(context) {
             Action.TOGGLE_DOCK to "Ocultar",
         )
 
-        const val DOCK_WIDTH_PX = 1400
-        const val DOCK_HEIGHT_PX = 190
+        // Tamanhos em PIXEL da view do dock. O tamanho no MUNDO é medido em tempo de execução
+        // contra o campo de visão (ver `DockPanelHost.applyVisibleWidth`), então estes números
+        // controlam a proporção interna e a resolução do texto — não o quão grande o dock
+        // aparece. É por isso que dá para aumentá-los sem o dock mudar de tamanho na tela: o
+        // que muda é que o texto é rasterizado maior dentro do mesmo espaço, ou seja, fica mais
+        // legível.
+        const val DOCK_WIDTH_PX = 1500
+        const val DOCK_HEIGHT_PX = 250
+
+        /**
+         * Texto dos glifos e rótulos.
+         *
+         * Eram 40f e 18f, e o resultado no aparelho foi um dock com ícones minúsculos. O número
+         * que importa não é o ponto, é a fração da altura do dock que o texto ocupa: com 190 px
+         * de altura, glifo de 40 + rótulo de 18 deixava ~60% da célula vazia. Com 250 px e estes
+         * valores, o par preenche a célula e continua legível à distância de um braço.
+         */
+        private const val GLYPH_TEXT_SP = 62f
+        private const val LABEL_TEXT_SP = 27f
 
         // A largura do dock em METROS mora em `MrTokens.DOCK_WIDTH_M`, não aqui. Ela já esteve
         // neste companion object, e foi exatamente isso que quebrou `DockPanelHost` e
