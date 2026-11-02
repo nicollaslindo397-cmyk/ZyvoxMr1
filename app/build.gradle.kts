@@ -2,13 +2,12 @@ import java.net.URI
 import java.security.MessageDigest
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.Directory
 import org.gradle.api.file.DirectoryProperty
-import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputFile
-import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 
@@ -94,19 +93,45 @@ abstract class FetchHandModelTask : DefaultTask() {
      * caminhos produzem `hand_landmarker.task` e o merge de assets falha com arquivo duplicado —
      * ou seja, usar o fallback offline quebraria o build em vez de salvá-lo.
      *
-     * É `FileCollection` (e não `File`) para não capturar um `File` na configuração: o Gradle
-     * trata isso como dependência implícita não declarada.
+     * ### Por que `@InputFiles`/`ConfigurableFileCollection` e não `@InputFile @Optional`
+     *
+     * Foi tentado com `@InputFile` + `@Optional` + `RegularFileProperty`, e falhou no caso mais
+     * comum de todos — ninguém ter rodado o script offline:
+     *
+     * ```
+     * Input file does not exist
+     *   Type 'FetchHandModelTask' property 'manualModel' specifies file
+     *   '…/app/src/main/assets/hand_landmarker.task' which doesn't exist
+     * ```
+     *
+     * `@Optional` NÃO suspende a checagem de existência de um `@InputFile`. Ele só permite que a
+     * propriedade fique *desconfigurada*; uma vez configurada com um caminho, o Gradle valida que
+     * o arquivo existe. Como aqui a propriedade é sempre configurada (o caminho é fixo), ela era
+     * validada sempre — e o build só passaria em máquinas que por acaso já tivessem baixado o
+     * modelo à mão.
+     *
+     * `ConfigurableFileCollection` sob `@InputFiles` resolve: uma coleção tolera entradas
+     * ausentes por definição, então o caminho continua declarado como entrada (o up-to-date check
+     * percebe se alguém colocar o arquivo lá) sem exigir que ele exista. E declarar a entrada é o
+     * que evita o aviso de dependência implícita que o Gradle emite quando se lê um `File` não
+     * declarado dentro do `@TaskAction`.
      */
-    @get:InputFile
-    @get:Optional
-    abstract val manualModel: RegularFileProperty
+    @get:InputFiles
+    abstract val manualModel: ConfigurableFileCollection
 
     @TaskAction
     fun fetch() {
         // ── Fallback offline ──────────────────────────────────────────────────────────────
-        if (manualModel.isPresent) {
-            val manual = manualModel.get().asFile
-            if (manual.exists() && manual.length() > 0L) {
+        // `files.firstOrNull()` em vez de `.isPresent`/`.get().asFile`: a propriedade agora é uma
+        // `ConfigurableFileCollection`, que não tem `isPresent`. Também é preferível a
+        // `singleFile`, que lança `IllegalStateException` se a coleção ficar vazia ou vier com
+        // mais de um arquivo — e um fallback offline não deve ter como falhar o build por um
+        // detalhe de configuração. A checagem de existência é nossa, logo abaixo, e não do Gradle.
+        // Ver a KDoc de `manualModel` para o motivo de a existência não poder ser exigida na
+        // validação de entradas.
+        run {
+            val manual = manualModel.files.firstOrNull()
+            if (manual != null && manual.exists() && manual.length() > 0L) {
                 logger.lifecycle(
                     "hand_landmarker.task já fornecido em ${manual.path} (${manual.length()} bytes); " +
                         "download pulado e o diretório gerado fica vazio de propósito."
@@ -272,7 +297,11 @@ androidComponents {
             outputDir.set(buildDir.dir("generated/mediapipe-model/${variant.name}"))
             // Fallback offline: se `scripts/fetch-hand-model.sh` já colocou o modelo nos assets
             // estáticos, a task não baixa e não escreve nada — ver a KDoc de `manualModel`.
-            manualModel.set(file("src/main/assets/hand_landmarker.task"))
+            //
+            // `.from(...)` e não `.set(...)`: `manualModel` é `ConfigurableFileCollection`, que
+            // não tem `set`. O caminho é declarado mesmo quando o arquivo não existe, e é isso
+            // que o torna uma entrada tolerante a ausência.
+            manualModel.from(file("src/main/assets/hand_landmarker.task"))
         }
         // `?.` porque `variant.sources.assets` é `SourceDirectories.Layered?` no DSL Kotlin,
         // embora o demo do SceneView (Groovy) o chame sem null-check — Groovy não distingue.
