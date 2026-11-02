@@ -1,0 +1,65 @@
+# --- Segredos / ambiente ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.*
+
+# --- Dependências ---
+node_modules/
+vendor/
+bower_components/
+
+# --- Build / output ---
+dist/
+build/
+out/
+target/
+*.tsbuildinfo
+.next/
+.nuxt/
+.output/
+.parcel-cache/
+.svelte-kit/
+.vite/
+coverage/
+htmlcov/
+*.egg-info/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.nox/
+.tox/
+
+# --- Node / JS ---
+.turbo/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editores / SO ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Logs / temporários ---
+*.log
+logs/
+tmp/
+temp/
