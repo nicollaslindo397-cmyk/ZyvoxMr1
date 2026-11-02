@@ -1,5 +1,5 @@
 # ─── Por que este workflow existe ───────────────────────────────────────────────
-# Compilar um APK exige JDK 21, Gradle 9.x e o Android SDK (compileSdk 37 + build-tools).
+# Compilar um APK exige JDK 21, Gradle 9.x e o Android SDK (compileSdk 37).
 # Este é o único caminho do projeto que produz um APK instalável: os runners do GitHub têm
 # rede e toolchain, e o artefato sai pronto para download.
 #
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   build:
     name: assembleDebug + testes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
@@ -47,79 +47,44 @@ jobs:
       # gradle/wrapper/gradle-wrapper.properties e disponibiliza `gradle` no PATH.
       - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          # O modelo do MediaPipe (~7 MB) é baixado a cada build; o cache do Gradle cobre
-          # dependências, não esse asset.
-          cache-read-only: false
 
-      # compileSdk 37 é exigido pelo AAR do SceneView.
+      # ─── Por que NÃO há passo de instalação do Android SDK ────────────────────────────
+      # Houve um aqui, e era ele que quebrava o build.
       #
-      # Por que uma action e não `sdkmanager` à mão: a versão anterior deste passo procurava
-      # `sdkmanager` dentro de `$ANDROID_HOME` e adivinhava a versão do build-tools. Falha
-      # pelos dois lados — os runners nem sempre têm `cmdline-tools` instalado (e é nele que
-      # mora o `sdkmanager`), e `build-tools;37.0.0` pode não ser a versão publicada para a
-      # platform 37. Esta action instala o cmdline-tools, aceita licenças e resolve as
-      # versões, que é exatamente o que não se deve reimplementar à mão.
-      # ─── Diagnóstico ANTES de instalar ──────────────────────────────────────────────────
-      # Este passo existe porque o passo de instalação falhou duas vezes seguidas (com
-      # sdkmanager à mão e com android-actions/setup-android) e o log do GitHub fica num host
-      # de blob storage que não é legível de fora do runner. Sem isto, cada tentativa é um
-      # chute às cegas de ~1 minuto.
+      # Duas versões desse passo falharam no mesmo ponto — uma com `sdkmanager` chamado à
+      # mão, outra com `android-actions/setup-android@v3` — ambas tentando instalar
+      # `platforms;android-37`. A evidência de que o passo era o problema, e não a solução,
+      # vem do CI do próprio SceneView (`.github/workflows/ci.yml` e `build-apks.yml`, na
+      # tag v4.65.0): aqueles workflows rodam `assembleDebug` com `compileSdk 37` em
+      # `ubuntu-latest` e não contêm NENHUMA menção a `setup-android`, `sdkmanager`,
+      # `platforms;` ou `build-tools;`. Eles confiam no SDK que a imagem do runner já traz.
       #
-      # A hipótese que isto testa: `platforms;android-37` pode não existir no canal estável do
-      # SDK. O AAR do SceneView 4.65.0 declara minCompileSdk=37, e o AGP 9.4 suporta "no
-      # máximo API 37" — mas API 37 pode ainda estar só no canal preview, o que exigiria ou
-      # `channel=1` no sdkmanager ou um SceneView mais antigo.
-      #
-      # `|| true` em tudo: um passo de diagnóstico nunca pode ser o motivo da falha.
-      - name: Diagnóstico do SDK disponível
-        run: |
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
-          echo "ANDROID_HOME='${ANDROID_HOME:-<vazio>}'  ANDROID_SDK_ROOT='${ANDROID_SDK_ROOT:-<vazio>}'"
-          echo "SDK_ROOT=$SDK_ROOT"
-          echo "── conteúdo de SDK_ROOT ──"
-          ls -1 "$SDK_ROOT" 2>&1 || echo "  (ausente)"
-          echo "── platforms já instaladas ──"
-          ls -1 "$SDK_ROOT/platforms" 2>&1 || echo "  (nenhuma)"
-          echo "── build-tools já instalados ──"
-          ls -1 "$SDK_ROOT/build-tools" 2>&1 || echo "  (nenhum)"
-          echo "── cmdline-tools ──"
-          ls -1 "$SDK_ROOT/cmdline-tools" 2>&1 || echo "  (ausente)"
-          SM="$(find "$SDK_ROOT" -name sdkmanager -type f 2>/dev/null | head -1 || true)"
-          echo "sdkmanager=$SM"
-          if [ -n "$SM" ]; then
-            echo "── platforms DISPONÍVEIS no repositório ──"
-            "$SM" --sdk_root="$SDK_ROOT" --list 2>/dev/null | grep -E "^\s+platforms;android-3[0-9]" || echo "  (grep não achou nada)"
-            echo "── build-tools DISPONÍVEIS ──"
-            "$SM" --sdk_root="$SDK_ROOT" --list 2>/dev/null | grep -E "^\s+build-tools;3[0-9]" || echo "  (grep não achou nada)"
-          fi
+      # Então fazemos o mesmo. O passo de conferência abaixo continua de guarda: se a imagem
+      # do runner um dia regredir, ele falha em segundos com uma mensagem apontando para a
+      # causa certa, em vez de deixar o AGP falhar dez minutos depois culpando outra coisa.
 
-      - name: Instalar Android SDK (platform 37 + build-tools)
-        uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-37 build-tools;37.0.0 platform-tools"
-          log-accepted-licenses: false
-
-      # Diagnóstico explícito. Quando um passo de toolchain falha, o log do GitHub fica num
-      # host de blob storage separado, e a causa real ("a platform 37 não veio") se perde.
-      # Imprimir o estado aqui custa segundos e torna a próxima falha legível de fora.
+      # Diagnóstico barato e à prova de falha. O log do GitHub fica num host de blob storage
+      # que não é legível de fora do runner, então cada tentativa às cegas custa um ciclo
+      # inteiro; imprimir o estado aqui torna a próxima falha legível. Nada neste passo pode
+      # derrubar o job, exceto a verificação final explícita.
       - name: Conferir toolchain
         run: |
-          set -euo pipefail
-          echo "── java ──"; java -version 2>&1
-          echo "── gradle ──"; gradle --version 2>&1 | head -12
-          echo "── ANDROID_HOME=${ANDROID_HOME:-<vazio>} ──"
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
-          echo "── plataformas instaladas ──"
-          ls -1 "$SDK_ROOT/platforms" 2>&1 || echo "  (nenhuma / diretório ausente)"
+          echo "── java ──"; java -version 2>&1 || true
+          echo "── gradle ──"; gradle --version 2>&1 | head -8 || true
+          echo "── ANDROID_HOME='${ANDROID_HOME:-<vazio>}'  SDK_ROOT=$SDK_ROOT ──"
+          echo "── platforms instaladas ──"
+          ls -1 "$SDK_ROOT/platforms" 2>&1 || echo "  (diretório ausente)"
           echo "── build-tools instalados ──"
-          ls -1 "$SDK_ROOT/build-tools" 2>&1 || echo "  (nenhum / diretório ausente)"
-          # Falha aqui, e não dez minutos depois dentro do AGP, com uma mensagem que aponta
-          # para a classe errada.
+          ls -1 "$SDK_ROOT/build-tools" 2>&1 || echo "  (diretório ausente)"
+
           if [ ! -d "$SDK_ROOT/platforms/android-37" ]; then
-            echo "::error::platforms;android-37 não está instalada em $SDK_ROOT"
+            echo "::error::platforms/android-37 ausente em $SDK_ROOT."
+            echo "::error::O AAR do SceneView 4.65.0 declara minCompileSdk=37, então o build não pode prosseguir."
+            echo "::error::Se a imagem do runner não traz mais a API 37, reinstale com android-actions/setup-android@v3 (packages: 'platforms;android-37')."
             exit 1
           fi
+          echo "OK: platform 37 presente."
 
       # O `hand_landmarker.task` é baixado pela tarefa `fetchHandModel` do próprio build.
       # Rodá-la aqui primeiro separa "a rede falhou" de "o código não compila", que são dois
