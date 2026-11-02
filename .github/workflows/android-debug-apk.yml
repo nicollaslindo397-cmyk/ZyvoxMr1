@@ -52,26 +52,40 @@ jobs:
           # dependências, não esse asset.
           cache-read-only: false
 
-      # compileSdk 37 é exigido pelo AAR do SceneView. Os runners ubuntu-24.04 vêm com um
-      # SDK pré-instalado, mas não necessariamente com a plataforma 37 — por isso instalamos
-      # explicitamente em vez de confiar no que já está lá.
-      - name: Instalar plataforma Android 37 e build-tools
+      # compileSdk 37 é exigido pelo AAR do SceneView.
+      #
+      # Por que uma action e não `sdkmanager` à mão: a versão anterior deste passo procurava
+      # `sdkmanager` dentro de `$ANDROID_HOME` e adivinhava a versão do build-tools. Falha
+      # pelos dois lados — os runners nem sempre têm `cmdline-tools` instalado (e é nele que
+      # mora o `sdkmanager`), e `build-tools;37.0.0` pode não ser a versão publicada para a
+      # platform 37. Esta action instala o cmdline-tools, aceita licenças e resolve as
+      # versões, que é exatamente o que não se deve reimplementar à mão.
+      - name: Instalar Android SDK (platform 37 + build-tools)
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-37 build-tools;37.0.0 platform-tools"
+          log-accepted-licenses: false
+
+      # Diagnóstico explícito. Quando um passo de toolchain falha, o log do GitHub fica num
+      # host de blob storage separado, e a causa real ("a platform 37 não veio") se perde.
+      # Imprimir o estado aqui custa segundos e torna a próxima falha legível de fora.
+      - name: Conferir toolchain
         run: |
           set -euo pipefail
+          echo "── java ──"; java -version 2>&1
+          echo "── gradle ──"; gradle --version 2>&1 | head -12
+          echo "── ANDROID_HOME=${ANDROID_HOME:-<vazio>} ──"
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
-          echo "Usando SDK em: $SDK_ROOT"
-          SDKMANAGER="$(find "$SDK_ROOT" -name sdkmanager -type f 2>/dev/null | head -1 || true)"
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager não encontrado em $SDK_ROOT"
+          echo "── plataformas instaladas ──"
+          ls -1 "$SDK_ROOT/platforms" 2>&1 || echo "  (nenhuma / diretório ausente)"
+          echo "── build-tools instalados ──"
+          ls -1 "$SDK_ROOT/build-tools" 2>&1 || echo "  (nenhum / diretório ausente)"
+          # Falha aqui, e não dez minutos depois dentro do AGP, com uma mensagem que aponta
+          # para a classe errada.
+          if [ ! -d "$SDK_ROOT/platforms/android-37" ]; then
+            echo "::error::platforms;android-37 não está instalada em $SDK_ROOT"
             exit 1
           fi
-          # `yes |` aceita as licenças. Sem isto o sdkmanager trava esperando input num
-          # ambiente não-interativo e o job morre no timeout.
-          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
-            "platforms;android-37" \
-            "build-tools;37.0.0" \
-            "platform-tools"
 
       # O `hand_landmarker.task` é baixado pela tarefa `fetchHandModel` do próprio build.
       # Rodá-la aqui primeiro separa "a rede falhou" de "o código não compila", que são dois
