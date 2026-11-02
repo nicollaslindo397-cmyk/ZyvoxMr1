@@ -91,9 +91,21 @@ class HandTrackerPipeline(
                 )
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setNumHands(maxHands)
-                // 0.5 é o padrão do modelo. Subir demais faz a mão sumir quando ela se
-                // afasta ou vira de lado; baixar demais traz detecções fantasmas.
-                .setMinHandDetectionConfidence(0.5f)
+                // Detecção mais frouxa que o padrão 0.5, e é por causa da câmera TRASEIRA.
+                //
+                // Os limiares do modelo são calibrados para mão perto da lente (selfie, ~25 cm).
+                // Aqui o aparelho fica a ~50-60 cm do usuário e a mão se estende à frente dele,
+                // então a mão ocupa bem menos pixels e chega com menos nitidez — exatamente o
+                // regime em que 0.5 descarta detecções legítimas. O sintoma é indistinguível de
+                // "hand tracking não funciona": o modelo roda, não lança erro, e devolve zero
+                // mãos para sempre.
+                //
+                // Só a DETECÇÃO afrouxa. Presença e tracking ficam em 0.5: eles governam a
+                // estabilidade do gesto uma vez que a mão foi achada, e baixá-los traria o
+                // tremor e a seleção fantasma que a histerese de pinch existe para evitar.
+                // Detecção fantasma é barata aqui — ela morre no quadro seguinte, e
+                // [isHandUsable] ainda filtra mão pequena demais ou fora do quadro.
+                .setMinHandDetectionConfidence(0.35f)
                 .setMinHandPresenceConfidence(0.5f)
                 .setMinTrackingConfidence(0.5f)
                 .setResultListener(::onHands)

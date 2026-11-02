@@ -12,14 +12,23 @@
     <!-- Estado / avisos -->
     <string name="status_initializing">Iniciando câmera…</string>
     <string name="status_no_model">Modelo de hand tracking ausente — veja BUILD.md</string>
-    <string name="status_show_hands">Mostre as duas mãos para a câmera</string>
+    <!--
+      Diz ONDE pôr a mão, porque com câmera traseira isso não é óbvio: a mão que segura o
+      aparelho fica do lado da tela, onde a câmera não vê. A mensagem anterior ("Mostre as duas
+      mãos para a câmera") não resolvia — o usuário olhava a tela e não entendia por que nada
+      acontecia.
+    -->
+    <string name="status_show_hands">Ponha a mão à frente do aparelho, entre ele e você — a câmera é a traseira</string>
     <string name="status_tracking">Rastreando %1$d mão(s)</string>
 
     <!-- Dock -->
     <string name="dock_toggle">Mostrar/ocultar dock</string>
-    <string name="dock_browser">Navegador</string>
+    <string name="dock_youtube">YouTube</string>
+    <string name="dock_chrome">Chrome</string>
     <string name="dock_apps">Aplicativos</string>
     <string name="dock_recenter">Recentralizar</string>
+    <string name="dock_smaller">Diminuir dock</string>
+    <string name="dock_bigger">Aumentar dock</string>
     <string name="dock_settings">Ajustes</string>
     <string name="dock_close_all">Fechar tudo</string>
 
@@ -33,7 +42,21 @@
     <!-- Barra de endereço -->
     <string name="url_hint">Endereço ou busca</string>
     <string name="url_open">Abrir</string>
-    <string name="url_default">https://example.com</string>
+    <string name="url_default">https://www.google.com</string>
+
+    <!--
+      Destinos dos botões do dock.
+
+      `url_default` era `https://example.com`, um placeholder de desenvolvimento que virou a
+      página que todo botão abria. Agora é o Google, que é o que "Janela" quer dizer na
+      prática: uma página inicial com barra de endereço para ir a qualquer outro site.
+
+      `m.youtube.com` em vez de `youtube.com`: o site desktop assume ponteiro e janela grande,
+      e num WebView de ~0,6 m o layout móvel é o que presta. O Chrome fica no domínio comum
+      porque ele mesmo redireciona e o usuário pode querer a versão desktop.
+    -->
+    <string name="url_youtube">https://m.youtube.com</string>
+    <string name="url_chrome">https://www.google.com/chrome/</string>
 
     <!-- Acessibilidade -->
     <string name="cd_hand_cursor">Cursor da mão</string>

@@ -35,8 +35,15 @@ import android.widget.TextView
  */
 class DockPanelView(context: Context) : FrameLayout(context) {
 
-    /** Ações que o dock expõe. */
-    enum class Action { BROWSER, NEW_WINDOW, RECENTER, TOGGLE_DOCK, CLOSE_ALL }
+    /**
+     * Ações que o dock expõe.
+     *
+     * `YOUTUBE` e `CHROME` substituem o antigo `BROWSER` genérico, que abria
+     * `https://example.com` — um placeholder de desenvolvimento no lugar de um app. O pedido
+     * foi explícito por esses dois, e faz sentido: são os dois destinos que alguém aponta um
+     * navegador de MR para assistir ou ler, e cada um abre como janela WebView independente.
+     */
+    enum class Action { YOUTUBE, CHROME, NEW_WINDOW, RECENTER, DOCK_SMALLER, DOCK_BIGGER, CLOSE_ALL, TOGGLE_DOCK }
 
     var onAction: ((Action) -> Unit)? = null
 
@@ -62,13 +69,9 @@ class DockPanelView(context: Context) : FrameLayout(context) {
         }
 
         // Ordem pensada para o polegar: o que se usa mais fica ao alcance do centro.
-        val items = listOf(
-            Triple(Action.BROWSER, GLYPH_BROWSER, LABEL_BROWSER),
-            Triple(Action.NEW_WINDOW, GLYPH_NEW, LABEL_NEW),
-            Triple(Action.RECENTER, GLYPH_RECENTER, LABEL_RECENTER),
-            Triple(Action.CLOSE_ALL, GLYPH_CLOSE_ALL, LABEL_CLOSE_ALL),
-            Triple(Action.TOGGLE_DOCK, GLYPH_HIDE, LABEL_HIDE),
-        )
+        val items = ACTION_ORDER.map { action ->
+            Triple(action, GLYPHS.getValue(action), LABELS.getValue(action))
+        }
 
         items.forEach { (action, glyph, label) ->
             val button = dockButton(glyph, label) { onAction?.invoke(action) }
@@ -130,7 +133,55 @@ class DockPanelView(context: Context) : FrameLayout(context) {
     }
 
     companion object {
-        const val DOCK_WIDTH_PX = 1120
+        /**
+         * Ordem dos botões, da esquerda para a direita — **fonte única**.
+         *
+         * O [dev.zyvox.mr.spatial.SpatialInputRouter] divide a largura do dock por esta lista
+         * para decidir qual botão o cursor está apontando. Antes a ordem existia duas vezes,
+         * uma aqui e uma hardcoded no router: adicionar YouTube e Chrome numa e esquecer a outra
+         * faria o toque disparar o botão vizinho, sem nenhum erro em lugar algum. Derivar o
+         * layout daqui e o router ler daqui é o que impede essa divergência.
+         *
+         * A ordem põe os destinos primeiro (é o que se usa mais), depois o controle de tamanho
+         * do dock, e por último o que destrói estado — longe do polegar, porque "Fechar tudo"
+         * ao lado de "YouTube" é um clique acidental esperando para acontecer.
+         */
+        val ACTION_ORDER: List<Action> = listOf(
+            Action.YOUTUBE,
+            Action.CHROME,
+            Action.NEW_WINDOW,
+            Action.RECENTER,
+            Action.DOCK_SMALLER,
+            Action.DOCK_BIGGER,
+            Action.CLOSE_ALL,
+            Action.TOGGLE_DOCK,
+        )
+
+        // Glifos escolhidos por estarem presentes em qualquer fonte de sistema. Evitamos
+        // emoji: depende de fonte colorida e o tamanho rendered varia entre aparelhos.
+        private val GLYPHS: Map<Action, String> = mapOf(
+            Action.YOUTUBE to "▶",
+            Action.CHROME to "◎",
+            Action.NEW_WINDOW to "＋",
+            Action.RECENTER to "⌖",
+            Action.DOCK_SMALLER to "−",
+            Action.DOCK_BIGGER to "＋",
+            Action.CLOSE_ALL to "✕",
+            Action.TOGGLE_DOCK to "⌄",
+        )
+
+        private val LABELS: Map<Action, String> = mapOf(
+            Action.YOUTUBE to "YouTube",
+            Action.CHROME to "Chrome",
+            Action.NEW_WINDOW to "Janela",
+            Action.RECENTER to "Centrar",
+            Action.DOCK_SMALLER to "Menor",
+            Action.DOCK_BIGGER to "Maior",
+            Action.CLOSE_ALL to "Fechar",
+            Action.TOGGLE_DOCK to "Ocultar",
+        )
+
+        const val DOCK_WIDTH_PX = 1400
         const val DOCK_HEIGHT_PX = 190
 
         // A largura do dock em METROS mora em `MrTokens.DOCK_WIDTH_M`, não aqui. Ela já esteve
@@ -153,18 +204,11 @@ class DockPanelView(context: Context) : FrameLayout(context) {
         private const val GLYPH_COLOR = 0xFFE8F1FA.toInt()
         private const val LABEL_COLOR = 0xFF9FB0C4.toInt()
 
-        // Glifos escolhidos por estarem presentes em qualquer fonte de sistema. Evitamos
-        // emoji: depende de fonte colorida e o tamanho rendered varia entre aparelhos.
-        private const val GLYPH_BROWSER = "◎"
-        private const val GLYPH_NEW = "＋"
-        private const val GLYPH_RECENTER = "⌖"
-        private const val GLYPH_CLOSE_ALL = "✕"
-        private const val GLYPH_HIDE = "⌄"
-
-        private const val LABEL_BROWSER = "Navegar"
-        private const val LABEL_NEW = "Janela"
-        private const val LABEL_RECENTER = "Centrar"
-        private const val LABEL_CLOSE_ALL = "Fechar"
-        private const val LABEL_HIDE = "Ocultar"
+        // Os glifos e rótulos por ação moram nos mapas `GLYPHS`/`LABELS` acima, junto com
+        // `ACTION_ORDER`. Estavam aqui como constantes soltas (`GLYPH_BROWSER`, `LABEL_HIDE`,
+        // …) e foi assim que a ordem dos botões acabou duplicada entre esta view e o
+        // `SpatialInputRouter`: cada lado listava as ações do seu jeito. Um mapa indexado por
+        // `Action` torna impossível adicionar um botão num lugar e esquecer no outro — o
+        // compilador exige a entrada nos dois mapas.
     }
 }

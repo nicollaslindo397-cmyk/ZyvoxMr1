@@ -150,6 +150,20 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
     var viewWidthPx by remember { mutableStateOf(0) }
     var viewHeightPx by remember { mutableStateOf(0) }
 
+    /**
+     * Dimensões da imagem de análise **após** a rotação para upright.
+     *
+     * O `onFrame` as publica para o [HandSkeleton], que precisa do mesmo mapeamento
+     * imagem→tela que o cursor usa. Se cada um derivasse essas dimensões do seu jeito, o
+     * esqueleto e o cursor divergiriam e o usuário veria o cursor fora da mão que brilha.
+     *
+     * É estado observável escrito a ~30 Hz, mas o `onFrame` compara antes de escrever: o valor
+     * só muda de fato numa rotação do aparelho ou reconfiguração da câmera, então na prática
+     * não há recomposição por quadro.
+     */
+    var uprightWidth by remember { mutableStateOf(0) }
+    var uprightHeight by remember { mutableStateOf(0) }
+
     // Estado das janelas (observável: muda raramente).
     val windows = viewModel.windows
 
@@ -165,13 +179,29 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
     // Ação do dock. Definida aqui porque precisa do viewModel.
     val onDockAction: (DockPanelView.Action) -> Unit = { action ->
         when (action) {
-            DockPanelView.Action.BROWSER ->
-                viewModel.openWindow(context.getString(dev.zyvox.mr.R.string.url_default))
+            DockPanelView.Action.YOUTUBE -> viewModel.openWindow(
+                url = context.getString(dev.zyvox.mr.R.string.url_youtube),
+                title = context.getString(dev.zyvox.mr.R.string.dock_youtube),
+            )
 
-            DockPanelView.Action.NEW_WINDOW ->
-                viewModel.openWindow(context.getString(dev.zyvox.mr.R.string.url_default))
+            DockPanelView.Action.CHROME -> viewModel.openWindow(
+                url = context.getString(dev.zyvox.mr.R.string.url_chrome),
+                title = context.getString(dev.zyvox.mr.R.string.dock_chrome),
+            )
+
+            // "Janela" abre a página inicial, que tem a barra de endereço: é o caminho para
+            // qualquer outro site, agora que YouTube e Chrome têm botão próprio.
+            DockPanelView.Action.NEW_WINDOW -> viewModel.openWindow(
+                context.getString(dev.zyvox.mr.R.string.url_default),
+            )
 
             DockPanelView.Action.RECENTER -> viewModel.recenterWindows()
+
+            DockPanelView.Action.DOCK_SMALLER ->
+                viewModel.adjustDockScale(-MrTokens.DOCK_SCALE_STEP)
+
+            DockPanelView.Action.DOCK_BIGGER ->
+                viewModel.adjustDockScale(+MrTokens.DOCK_SCALE_STEP)
 
             DockPanelView.Action.CLOSE_ALL -> viewModel.closeAllWindows()
 
@@ -224,6 +254,12 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
                 // ── Sincroniza painéis com o estado ───────────────────────────────────────
                 wHost.sync(windows)
                 dHost.setVisible(viewModel.dockVisible)
+                // A escala do dock é aplicada aqui, não num `LaunchedEffect(dockScale)`: o
+                // `applyScale` é idempotente e só reescreve `pxPerUnits` quando o valor mudou de
+                // fato, então o custo por frame é uma comparação de float. Fazer por efeito
+                // funcionaria, mas dividiria em dois lugares a regra de "quando o dock muda de
+                // tamanho" — e este já é o ponto onde todo o resto do estado espacial é aplicado.
+                dHost.applyScale(viewModel.dockScale)
 
                 // ── Projeção do cursor ────────────────────────────────────────────────────
                 val hand: TrackedHand? = viewModel.latestHandFrame.hands.firstOrNull()
@@ -239,6 +275,10 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
                         cameraController.rotationDegrees,
                     )
                     if (upright != null) {
+                        if (uprightWidth != upright.width || uprightHeight != upright.height) {
+                            uprightWidth = upright.width
+                            uprightHeight = upright.height
+                        }
                         // Landmark → pixel de tela, compensando o corte do aspect-fill.
                         val (sx, sy) = ScreenMapper.imageToView(
                             nx = hand.viewX,
@@ -341,7 +381,18 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
             Node(apply = { sceneRoot.value = this })
         }
 
-        // 3. HUD 2D.
+        // 3. Esqueleto da mão, sobre o passthrough e sobre a cena.
+        //
+        // Acima do `SceneView` de propósito: as "cordinhas" descrevem a mão real, que está no
+        // vídeo. Se ficassem abaixo da cena, uma janela WebView aberta cobriria o esqueleto e o
+        // feedback visual sumiria justo quando o usuário está tentando acertar algo.
+        HandSkeleton(
+            viewModel = viewModel,
+            imageWidth = uprightWidth,
+            imageHeight = uprightHeight,
+        )
+
+        // 4. HUD 2D.
         MrHud(viewModel = viewModel)
     }
 

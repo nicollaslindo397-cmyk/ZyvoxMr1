@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import dev.zyvox.mr.hand.HandFrame
 import dev.zyvox.mr.hand.HandTrackerPipeline
+import dev.zyvox.mr.ui.MrTokens
 import dev.zyvox.mr.window.MrWindow
 import dev.zyvox.mr.window.WindowStack
 
@@ -91,6 +92,25 @@ class MrViewModel(application: Application) : AndroidViewModel(application) {
     val windows = mutableStateListOf<MrWindow>()
 
     var dockVisible by mutableStateOf(true)
+
+    /**
+     * Escala do dock, aplicada sobre [dev.zyvox.mr.ui.MrTokens.DOCK_WIDTH_M].
+     *
+     * Observável de propósito (e não `@Volatile` como o resto do caminho de render): mudar a
+     * escala é uma ação rara e discreta do usuário, então vale uma recomposição. O que não pode
+     * é o estado por quadro do hand tracking virar observável — ver a KDoc da classe.
+     */
+    var dockScale by mutableStateOf(1.0f)
+        private set
+
+    /**
+     * Ajusta o tamanho do dock. Preso entre [MrTokens.DOCK_SCALE_MIN] e
+     * [MrTokens.DOCK_SCALE_MAX]: abaixo disso os botões ficam menores que o cursor e o hand
+     * tracking não os acerta; acima, o dock passa a cobrir o conteúdo que ele existe para abrir.
+     */
+    fun adjustDockScale(delta: Float) {
+        dockScale = (dockScale + delta).coerceIn(MrTokens.DOCK_SCALE_MIN, MrTokens.DOCK_SCALE_MAX)
+    }
 
     /** Não-observável: só a HUD lê, e ela já recomposição por outros motivos. */
     var lastLatencyMs: Float = 0f

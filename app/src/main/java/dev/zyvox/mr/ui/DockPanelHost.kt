@@ -43,6 +43,9 @@ class DockPanelHost(
 
     private val windowManager = ViewNode.WindowManager(materialLoader.context)
 
+    /** Escala vigente, para [applyScale] não reescrever `pxPerUnits` à toa. */
+    private var currentScale = 0f
+
     val node: ViewNode = ViewNode(
         engine = engine,
         windowManager = windowManager,
@@ -51,13 +54,46 @@ class DockPanelHost(
         unlit = true,
     )
 
+    /**
+     * Largura **efetiva** do dock no mundo, já com a escala do usuário aplicada.
+     *
+     * Tudo que precisa saber onde o dock termina — teste de contenção, mapeamento de toque,
+     * divisão dos botões no [dev.zyvox.mr.spatial.SpatialInputRouter] — tem de ler daqui, nunca
+     * de [MrTokens.DOCK_WIDTH_M]. Aquela é a base; esta é a verdade em uso. Ler a base depois
+     * que a escala existe faz o toque ser registrado num botão e a ação sair de outro.
+     */
+    var worldWidthM: Float = MrTokens.DOCK_WIDTH_M
+        private set
+
+    /** Altura efetiva no mundo. Derivada da largura pela proporção fixa da view em pixel. */
+    val worldHeightM: Float
+        get() = worldWidthM * DockPanelView.DOCK_HEIGHT_PX / DockPanelView.DOCK_WIDTH_PX
+
     init {
         // Ordem obrigatória: janela off-screen antes de entrar na cena. Ver
         // [WindowPanelHost] para o porquê detalhado.
         windowManager.resume(ownerView)
         root.addChildNode(node)
-        node.pxPerUnits = DockPanelView.DOCK_WIDTH_PX / MrTokens.DOCK_WIDTH_M
+        applyScale(1.0f)
         node.position = Position(0f, MrTokens.DOCK_Y_M, -MrTokens.DOCK_DEPTH_M)
+    }
+
+    /**
+     * Redimensiona o dock. Idempotente e barato: só reescreve `pxPerUnits` quando a escala
+     * mudou de fato, porque esse setter remeide a superfície do `ViewNode`.
+     *
+     * Escalar por `pxPerUnits` (e não por `node.scale`) é o que mantém o conteúdo nítido:
+     * `pxPerUnits` muda quantos metros a view de pixel ocupa, então o texto é rasterizado de
+     * novo no tamanho novo. Multiplicar `scale` ampliaria a textura já rasterizada — o dock
+     * cresceria borrado, que é exatamente o defeito que um redimensionar precisa não ter.
+     * É o mesmo contrato das janelas WebView (ver [WindowMetrics]).
+     */
+    fun applyScale(scale: Float) {
+        val clamped = scale.coerceIn(MrTokens.DOCK_SCALE_MIN, MrTokens.DOCK_SCALE_MAX)
+        if (clamped == currentScale) return
+        currentScale = clamped
+        worldWidthM = MrTokens.DOCK_WIDTH_M * clamped
+        node.pxPerUnits = DockPanelView.DOCK_WIDTH_PX / worldWidthM
     }
 
     fun setVisible(visible: Boolean) {
@@ -67,23 +103,27 @@ class DockPanelHost(
     /**
      * Converte posição de mundo em pixel do dock, para o injetor de toque.
      *
-     * O dock é centrado em `x = 0` e tem largura/altura fixas no mundo, então o mapeamento é
-     * linear. `y` é invertido porque no mundo +y é para cima e em pixel de view é para baixo.
+     * O dock é centrado em `x = 0`, então o mapeamento é linear. `y` é invertido porque no
+     * mundo +y é para cima e em pixel de view é para baixo.
+     *
+     * Usa [worldWidthM] (a largura **efetiva**, com a escala aplicada) e não
+     * [MrTokens.DOCK_WIDTH_M]. Com o dock redimensionável, converter pela base faria o toque
+     * cair num pixel que não corresponde ao botão desenhado — o cursor estaria sobre "YouTube"
+     * e a ação disparada seria a de outro botão.
      */
     fun worldToPixel(worldX: Float, worldY: Float): Pair<Float, Float> {
-        val metersPerPx = MrTokens.DOCK_WIDTH_M / DockPanelView.DOCK_WIDTH_PX
+        val metersPerPx = worldWidthM / DockPanelView.DOCK_WIDTH_PX
         val px = (worldX / metersPerPx) + DockPanelView.DOCK_WIDTH_PX / 2f
         val py = (MrTokens.DOCK_Y_M - worldY) / metersPerPx
         return px to py
     }
 
-    /** O ponto (em metros) está dentro do quad do dock? */
+    /** O ponto (em metros) está dentro do quad do dock? Usa as dimensões efetivas. */
     fun contains(worldX: Float, worldY: Float): Boolean {
-        val metersPerPx = MrTokens.DOCK_WIDTH_M / DockPanelView.DOCK_WIDTH_PX
-        val heightM = DockPanelView.DOCK_HEIGHT_PX * metersPerPx
-        val halfW = MrTokens.DOCK_WIDTH_M / 2f
+        val halfW = worldWidthM / 2f
+        val halfH = worldHeightM / 2f
         return worldX in -halfW..halfW &&
-            worldY in (MrTokens.DOCK_Y_M - heightM / 2f)..(MrTokens.DOCK_Y_M + heightM / 2f)
+            worldY in (MrTokens.DOCK_Y_M - halfH)..(MrTokens.DOCK_Y_M + halfH)
     }
 
     fun destroy() {
@@ -92,8 +132,8 @@ class DockPanelHost(
         runCatching { windowManager.destroy() }
     }
 
-    companion object {
-        /** Largura do dock no mundo, espelhada aqui para evitar import circular no KDoc. */
-        private val DOCK_WIDTH_M = MrTokens.DOCK_WIDTH_M
-    }
+    // Não há companion object aqui. Ele existia só para um `private val DOCK_WIDTH_M` espelhado
+    // que nenhuma linha do arquivo lia — e que, agora que o dock é redimensionável, seria uma
+    // cópia permanentemente errada da largura efetiva. Um espelho morto de uma constante que
+    // deixou de ser constante é o tipo de coisa que alguém lê e confia.
 }

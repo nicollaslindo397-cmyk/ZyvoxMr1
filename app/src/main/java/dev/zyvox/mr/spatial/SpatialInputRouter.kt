@@ -248,14 +248,12 @@ class SpatialInputRouter(
      * hardcodear o índice é o que mantém isto correto se um item for adicionado ou removido.
      */
     private fun actionAt(worldX: Float): DockPanelView.Action? {
-        val actions = listOf(
-            DockPanelView.Action.BROWSER,
-            DockPanelView.Action.NEW_WINDOW,
-            DockPanelView.Action.RECENTER,
-            DockPanelView.Action.CLOSE_ALL,
-            DockPanelView.Action.TOGGLE_DOCK,
-        )
-        val half = dev.zyvox.mr.ui.MrTokens.DOCK_WIDTH_M / 2f
+        val actions = DockPanelView.ACTION_ORDER
+        // Largura **efetiva** (com a escala do usuário), não `MrTokens.DOCK_WIDTH_M`. Dividir
+        // pela base com o dock ampliado faria o índice sair deslocado: o cursor estaria sobre
+        // "YouTube" e a ação disparada seria a de "Centrar". O erro cresce com a escala e some
+        // em 1.0, que é o tipo de bug que só aparece depois que o usuário mexe no tamanho.
+        val half = dockHost.worldWidthM / 2f
         val fraction = ((worldX + half) / (half * 2f)).coerceIn(0f, 0.9999f)
         val index = (fraction * actions.size).roundToInt().coerceIn(0, actions.size - 1)
         return actions.getOrNull(index)

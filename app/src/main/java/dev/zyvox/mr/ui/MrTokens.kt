@@ -83,8 +83,21 @@ object MrTokens {
     /** Profundidade do dock: um pouco mais perto que as janelas, para ler "à frente" delas. */
     const val DOCK_DEPTH_M = 0.40f
 
-    /** Posição vertical do dock no mundo (negativo = abaixo do centro do campo de visão). */
-    const val DOCK_Y_M = -0.20f
+    /**
+     * Posição vertical do dock no mundo. **Zero = centro exato do campo de visão.**
+     *
+     * Aqui estava `-0.20f`, e o efeito no aparelho foi concreto: para ver o dock o usuário
+     * precisava apontar o celular para baixo, porque o dock ficava 20 cm abaixo do centro da
+     * visão a 40 cm de distância — cerca de 27° para baixo. O pedido foi explícito ("quero que
+     * fique na direção dos olhos"), e num aparelho segurado à frente do rosto o centro do campo
+     * de visão É a direção dos olhos.
+     *
+     * Vale registrar por que "abaixo do centro" parecia certo no papel: é onde o dock do Quest 3
+     * fica. Mas lá o headset sabe para onde você olha e o dock acompanha; aqui a câmera é fixa
+     * no aparelho, então qualquer deslocamento vertical vira um ângulo que o braço tem de
+     * sustentar. Com 3DoF, centrado não é uma preferência estética — é o que não cansa.
+     */
+    const val DOCK_Y_M = 0.0f
 
     /**
      * Largura do dock no mundo, em metros.
@@ -98,6 +111,16 @@ object MrTokens {
      * 0,34 m a 0,40 m de profundidade cobre ~0,7 do campo de visão horizontal: largo o bastante
      * para os ícones serem alvejáveis pelo hand tracking, estreito o bastante para não dominar o
      * passthrough — a referência pede explicitamente um dock que NÃO preencha a tela.
+     *
+     * Este é o valor **base**: o tamanho real em uso é [DOCK_WIDTH_M] × `dockScale` do
+     * `MrViewModel`, porque o dock é redimensionável. Nada deve ler esta constante para decidir
+     * onde termina o dock — use a largura efetiva que o `DockPanelHost` expõe, senão o teste de
+     * contenção e o mapeamento de toque passam a valer só para a escala 1.0.
      */
     const val DOCK_WIDTH_M = 0.34f
+
+    /** Limites da escala do dock. Abaixo de 0,8 os alvos ficam menores que o cursor; acima de 2,2 o dock come o campo de visão. */
+    const val DOCK_SCALE_MIN = 0.8f
+    const val DOCK_SCALE_MAX = 2.2f
+    const val DOCK_SCALE_STEP = 0.15f
 }

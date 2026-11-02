@@ -76,6 +76,18 @@ fun MrHud(viewModel: MrViewModel) {
             if (!handTrackingAvailable) {
                 Spacer(Modifier.height(MrTokens.SpaceSm))
                 WarningPill(stringResource(R.string.status_no_model))
+            } else if (viewModel.latestHandFrame.handCount == 0) {
+                // O modelo carregou e a inferência roda, mas nenhuma mão foi achada. Antes isto
+                // não dizia nada ao usuário — o app ficava em silêncio e a leitura era "quebrou".
+                //
+                // E há um motivo concreto para a mão não ser achada: a câmera é a TRASEIRA. Quem
+                // segura o aparelho olha a tela, e a mão que segura fica do lado da tela — ou
+                // seja, atrás do aparelho, onde a câmera não vê. A mão livre precisa estar à
+                // frente do celular, entre ele e o usuário, o que é o contrário do instinto.
+                // `status_show_hands` já existia em strings.xml e nunca foi exibido em lugar
+                // nenhum; uma string não mostrada é orientação que o usuário nunca recebe.
+                Spacer(Modifier.height(MrTokens.SpaceSm))
+                WarningPill(stringResource(R.string.status_show_hands))
             }
         }
 
