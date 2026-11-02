@@ -35,12 +35,35 @@ data class MrWindow(
     companion object {
         const val TITLE_BAR_METERS = 0.045f
         const val DEFAULT_WIDTH = 0.64f
-        const val DEFAULT_HEIGHT = 0.44f
+
+        /**
+         * Derivada da largura, nunca um literal independente.
+         *
+         * Aqui estava `0.44f`, e o conteúdo é 1280×800 — proporção 1.6, não 0.64/0.44 = 1.4545.
+         * O certo é 0.64/1.6 = 0.40. As duas consequências são visíveis, não teóricas:
+         *
+         * 1. O quad esticava a página em ~10% na vertical. `ViewNode.pxPerUnits` é um escalar
+         *    único, então um quad com proporção diferente da view deforma o conteúdo — texto e
+         *    imagens saíam verticalmente esticados em toda janela recém-aberta.
+         * 2. O mapeamento de toque errava no eixo y. `pxPerUnitsFor` deriva da LARGURA
+         *    (`CONTENT_WIDTH_PX / widthMeters`) e é aplicado aos dois eixos; com a altura
+         *    inconsistente, `v` calculado a partir de metros não batia com o pixel real da view,
+         *    e o toque saía ~9% deslocado — pior quanto mais longe da barra de título.
+         *
+         * `resizeBy` nunca teve esse problema porque deriva `newH = newW / ASPECT`. O bug era só
+         * no estado inicial, o que explica o sintoma estranho: a primeira redimensionada
+         * "consertava" a janela. Derivar aqui elimina a classe inteira de divergência, em vez de
+         * trocar 0.44 por 0.40 e deixar a mesma armadilha armada.
+         */
+        const val DEFAULT_HEIGHT = DEFAULT_WIDTH / WindowMetrics.ASPECT
         const val DEFAULT_DEPTH = 0.55f
         const val MIN_WIDTH = 0.22f
-        const val MIN_HEIGHT = 0.16f
         const val MAX_WIDTH = 1.6f
-        const val MAX_HEIGHT = 1.2f
+
+        // MIN_HEIGHT e MAX_HEIGHT foram removidos: não eram lidos em lugar nenhum — `resizeBy`
+        // restringe só a largura e deriva a altura — e qualquer valor solto ali contradiria a
+        // proporção assim que alguém os usasse. Se um dia precisar de limite de altura, escreva
+        // `MIN_WIDTH / WindowMetrics.ASPECT`; não um número.
     }
 }
 

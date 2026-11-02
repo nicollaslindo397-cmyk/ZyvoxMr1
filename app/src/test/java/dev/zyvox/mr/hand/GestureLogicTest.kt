@@ -93,8 +93,12 @@ class GestureLogicTest {
         assertFalse(detector.isPinching)
 
         // Interrompido por um quadro acima, o contador zera.
-        assertFalse(detector.update(0.30f))
         assertFalse(detector.update(0.90f))
+
+        // E um quadro abaixo depois da interrupção NÃO ativa: o contador recomeçou do zero,
+        // então falta um quadro para chegar em activateFrames = 2. É isto que o teste promete no
+        // nome — "pico único não dispara" — e é o que filtra o frame ruidoso que causa
+        // "selecionou sozinho".
         assertFalse(detector.update(0.30f))
         assertFalse(detector.isPinching)
 
