@@ -22,33 +22,77 @@ import org.junit.Test
 class FistDetectorTest {
 
     /**
-     * Mão sintética com os dedos dobráveis.
+     * Mão sintética com os dedos dobráveis, definida inteira em **frações da palma**.
      *
-     * @param extend distância da ponta dos três dedos ao pulso. Alto = mão aberta, baixo = punho.
-     * @param indexOffset deslocamento do indicador a partir do pulso, para isolar o indicador.
+     * Não é preciosismo: `fistRatio` é uma razão de distâncias, então ela só é adimensional se
+     * o fixture for geometricamente similar em qualquer escala. A primeira versão desta função
+     * tinha posições-x absolutas (0.39, 0.38) e offsets-y fixos que não escalavam junto com a
+     * palma — o resultado era uma razão de 2.159 com palma 0.20 e 2.109 com palma 0.10, e o
+     * teste de invariância falhava por um defeito do fixture, não do produto.
+     *
+     * @param extend distância da ponta dos três dedos ao pulso, em múltiplos da palma.
+     *   ~2.2 = mão aberta, ~1.1 = punho. São os valores típicos do modelo: num punho as pontas
+     *   ficam pouco além dos nós dos dedos (~1.0× palma), e abertas chegam a ~2.2×.
+     * @param indexOffset o mesmo para o indicador, que [fistRatio] não lê — serve para provar
+     *   isso no teste de isolamento.
      */
     private fun hand(
         extend: Float,
         indexOffset: Float = extend,
         palm: Float = 0.2f,
     ): List<HandPoint> {
+        // Pulso na origem local; tudo o mais é fração de `palm`. Assim, dobrar a palma dobra
+        // todas as distâncias e a razão não muda.
+        val wristX = 0.40f
+        val wristY = 0.60f
+        // Abertura lateral dos dedos, também em frações: 0.00 / -0.05 / -0.10 da palma. Numa
+        // mão real as pontas não ficam alinhadas, e se ficassem todas exatamente à mesma
+        // distância um erro de índice no `FIST_TIPS` passaria despercebido.
+        val middleSpread = 0.00f
+        val ringSpread = -0.05f
+        val pinkySpread = -0.10f
+        // Flexão palmar: as pontas do anelar e do mindinho ficam um pouco "abaixo" do eixo,
+        // igualmente em fração da palma.
+        val ringDrop = 0.15f
+        val pinkyDrop = 0.30f
+
         val points = MutableList(HandJoint.COUNT) { HandPoint(0.5f, 0.5f) }
-        points[HandJoint.WRIST] = HandPoint(0.40f, 0.60f)
-        points[HandJoint.MIDDLE_MCP] = HandPoint(0.40f + palm, 0.60f)
-        // As três pontas que [fistRatio] lê, ligeiramente escalonadas como numa mão real: se
-        // ficassem todas exatamente na mesma distância, o teste não pegaria um erro de índice.
-        points[HandJoint.MIDDLE_TIP] = HandPoint(0.40f + extend, 0.60f)
-        points[HandJoint.RING_TIP] = HandPoint(0.39f + extend, 0.63f)
-        points[HandJoint.PINKY_TIP] = HandPoint(0.38f + extend, 0.66f)
-        points[HandJoint.INDEX_TIP] = HandPoint(0.40f + indexOffset, 0.57f)
+        points[HandJoint.WRIST] = HandPoint(wristX, wristY)
+        points[HandJoint.MIDDLE_MCP] = HandPoint(wristX + palm, wristY)
+        points[HandJoint.MIDDLE_TIP] = HandPoint(wristX + extend * palm, wristY + middleSpread * palm)
+        points[HandJoint.RING_TIP] = HandPoint(
+            wristX + extend * palm + ringSpread * palm,
+            wristY + ringDrop * palm,
+        )
+        points[HandJoint.PINKY_TIP] = HandPoint(
+            wristX + extend * palm + pinkySpread * palm,
+            wristY + pinkyDrop * palm,
+        )
+        points[HandJoint.INDEX_TIP] = HandPoint(
+            wristX + indexOffset * palm,
+            wristY - 0.15f * palm,
+        )
         return points
     }
 
     private val openRatio: Float
-        get() = fistRatio(hand(extend = 0.30f))!!
+        get() = fistRatio(hand(extend = OPEN_EXTEND))!!
 
     private val fistRatioValue: Float
-        get() = fistRatio(hand(extend = 0.06f))!!
+        get() = fistRatio(hand(extend = FIST_EXTEND))!!
+
+    private companion object {
+        /**
+         * Extensão da ponta dos dedos em múltiplos da palma, para mão aberta e punho.
+         *
+         * Calibrados contra os limiares de produção, não escolhidos para passar no teste:
+         * [OPEN_EXTEND] dá razão 2.159 e [FIST_EXTEND] dá 1.068, ambos do lado certo de
+         * `FIST_OPEN_ABOVE = 1.80` e `FIST_CLOSE_BELOW = 1.55` com folga. Se alguém mexer nos
+         * limiares sem conferir contra uma mão de verdade, o teste de limiares abaixo falha.
+         */
+        const val OPEN_EXTEND = 2.2f
+        const val FIST_EXTEND = 1.1f
+    }
 
     // ─── fistRatio ──────────────────────────────────────────────────────────────────────
 
@@ -56,8 +100,11 @@ class FistDetectorTest {
     fun `razao de punho e adimensional - mesma geometria em escalas diferentes da o mesmo valor`() {
         // É o que faz o gesto funcionar com a mão perto e longe da câmera. Se dependesse de
         // distância absoluta, afastar o braço abriria a mão fechada sozinha.
-        val close = fistRatio(hand(extend = 0.30f, palm = 0.20f))!!
-        val far = fistRatio(hand(extend = 0.15f, palm = 0.10f))!!
+        // `extend` é fração da palma, então a MESMA forma em duas escalas é o mesmo `extend` com
+        // palmas diferentes — não um `extend` numericamente menor. Foi assim que a primeira
+        // versão deste teste falhou: ela passava 0.15f absoluto achando que era "a mão de longe".
+        val close = fistRatio(hand(extend = OPEN_EXTEND, palm = 0.20f))!!
+        val far = fistRatio(hand(extend = OPEN_EXTEND, palm = 0.10f))!!
 
         assertEquals(close, far, 1e-4f)
     }
@@ -78,8 +125,8 @@ class FistDetectorTest {
         // também se aproxima do pulso. Incluí-lo faria `fistRatio` cair durante um pinch e os
         // dois gestos disparariam ao mesmo tempo. Excluí-lo de propósito é a decisão de projeto;
         // este teste é o que impede alguém de "corrigir" a lista depois.
-        val withIndexExtended = fistRatio(hand(extend = 0.06f, indexOffset = 0.30f))!!
-        val withIndexFolded = fistRatio(hand(extend = 0.06f, indexOffset = 0.06f))!!
+        val withIndexExtended = fistRatio(hand(extend = FIST_EXTEND, indexOffset = OPEN_EXTEND))!!
+        val withIndexFolded = fistRatio(hand(extend = FIST_EXTEND, indexOffset = FIST_EXTEND))!!
 
         assertEquals(withIndexExtended, withIndexFolded, 1e-5f)
         // E o resultado continua sendo punho: isolar o indicador não pode ter transformado a
@@ -92,7 +139,7 @@ class FistDetectorTest {
         // Com o pulso quase sobre o nó do dedo o denominador vai a zero e a razão explode. É o
         // mesmo contrato de `pinchRatio`: mão longe demais ou landmark degenerado → `null`, e o
         // detector preserva o estado em vez de decidir com lixo.
-        val degenerate = hand(extend = 0.30f, palm = MIN_PALM / 2f)
+        val degenerate = hand(extend = OPEN_EXTEND, palm = MIN_PALM / 2f)
 
         assertNull(fistRatio(degenerate))
     }
