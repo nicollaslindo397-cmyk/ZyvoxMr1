@@ -107,6 +107,10 @@ fun MrHud(viewModel: MrViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(MrTokens.SpaceSm),
         ) {
+            // É o primeiro da fila de propósito: o painel que abre aqui é o único caminho até a
+            // distância, altura, inclinação e tamanho da interface. Sem este botão, toda a seção de
+            // interface ajustável existiria no código e não seria alcançável pelo usuário.
+            HudButton(stringResource(R.string.hud_settings)) { viewModel.toggleSettingsPanel() }
             HudButton(stringResource(R.string.hud_background)) { viewModel.toggleBackground() }
             HudButton(stringResource(R.string.hud_dock_smaller)) {
                 viewModel.adjustDockScale(-MrTokens.DOCK_SCALE_STEP)

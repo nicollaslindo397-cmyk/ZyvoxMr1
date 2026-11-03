@@ -75,10 +75,19 @@ enum class GraphicsQuality {
 }
 
 /** Distâncias prontas da interface. O requisito pede exatamente estas quatro. */
-enum class InterfacePreset {
-    NEAR,
-    MEDIUM,
-    FAR,
+enum class InterfacePreset(
+    /**
+     * Distância em metros que o preset aplica, ou `null` para [CUSTOM].
+     *
+     * Mora no enum, e não espalhada entre `withPreset` e a tela de configurações, porque a UI
+     * mostra o número no botão ("Perto — 0,45 m"). Se o número existisse nos dois lugares, um dia
+     * alguém mudaria um deles e o botão passaria a prometer uma distância que o preset não aplica.
+     */
+    val distanceM: Float?,
+) {
+    NEAR(0.45f),
+    MEDIUM(InterfaceLayout.DEFAULT_DISTANCE_M),
+    FAR(1.60f),
 
     /**
      * "Personalizada": mantém os valores que o usuário já ajustou em vez de sobrescrevê-los.
@@ -86,7 +95,7 @@ enum class InterfacePreset {
      * Este caso existe porque um preset que sobrescreve o ajuste manual tornaria o ajuste manual
      * inútil — o usuário moveria a interface e qualquer preset seguinte jogaria o trabalho fora.
      */
-    CUSTOM,
+    CUSTOM(null),
 }
 
 /**
@@ -279,7 +288,7 @@ data class HandSettings(
      * mais sensibilidade = limiar de confiança MENOR. Deixar o usuário mexer no limiar direto
      * produziria o efeito oposto ao esperado.
      */
-    val sensitivity: Float = 0.55f,
+    val sensitivity: Float = DEFAULT_SENSITIVITY,
 
     /**
      * Suavização, 0 (resposta imediata, mais tremor) a 1 (muito estável, mais atraso).
@@ -305,6 +314,9 @@ data class HandSettings(
 ) {
     companion object {
         const val MIN_SENSITIVITY = 0f
+        /** Padrão da sensibilidade. Um só número para o campo, o fallback do `sanitized()` e o
+         *  caminho de não-finito do [detectionConfidence]: três lugares que precisam concordar. */
+        const val DEFAULT_SENSITIVITY = 0.55f
         const val MAX_SENSITIVITY = 1f
 
         const val MIN_CALIBRATION = -0.15f
@@ -323,7 +335,7 @@ data class HandSettings(
 
         return HandSettings(
             enabled = enabled,
-            sensitivity = clamp(sensitivity, MIN_SENSITIVITY, MAX_SENSITIVITY, 0.55f),
+            sensitivity = clamp(sensitivity, MIN_SENSITIVITY, MAX_SENSITIVITY, DEFAULT_SENSITIVITY),
             smoothing = clamp(smoothing, 0f, 1f, 0.40f),
             calibrationX = clamp(calibrationX, MIN_CALIBRATION, MAX_CALIBRATION, 0f),
             calibrationY = clamp(calibrationY, MIN_CALIBRATION, MAX_CALIBRATION, 0f),
@@ -342,8 +354,23 @@ data class HandSettings(
      */
     val detectionConfidence: Float
         get() {
-            val s = sensitivity.coerceIn(MIN_SENSITIVITY, MAX_SENSITIVITY)
-            return DETECTION_CONFIDENCE_HIGH - s * (DETECTION_CONFIDENCE_HIGH - DETECTION_CONFIDENCE_LOW)
+            // `NaN.coerceIn(a, b)` devolve NaN, então a verificação vem antes do clamp. Sem ela, um
+            // `HandSettings` não sanitizado produziria NaN aqui, e NaN como limiar de confiança faz
+            // o MediaPipe rejeitar toda detecção — o tracking morreria sem erro nenhum no log.
+            val s = if (sensitivity.isFinite()) {
+                sensitivity.coerceIn(MIN_SENSITIVITY, MAX_SENSITIVITY)
+            } else {
+                DEFAULT_SENSITIVITY
+            }
+            val derived = DETECTION_CONFIDENCE_HIGH - s * (DETECTION_CONFIDENCE_HIGH - DETECTION_CONFIDENCE_LOW)
+
+            // O clamp final não é redundante com o de cima: em float32, com `s = 1.0` esta conta dá
+            // 0.19999998807907104, que é MENOR que `DETECTION_CONFIDENCE_LOW` (0.20000000298023224).
+            // Ou seja, a fórmula sai da faixa que a própria documentação dela promete, no extremo,
+            // por arredondamento — não por lógica errada. Quem garante o intervalo é quem produz o
+            // número, porque é daqui que ele vai para o MediaPipe; depender de a conta cair
+            // exatamente na borda é frágil e quebra de novo ao menor ajuste nos extremos.
+            return derived.coerceIn(DETECTION_CONFIDENCE_LOW, DETECTION_CONFIDENCE_HIGH)
         }
 }
 
@@ -447,11 +474,10 @@ data class ZyvoxSettings(
      *
      * [InterfacePreset.CUSTOM] devolve a instância inalterada.
      */
-    fun withPreset(target: InterfacePreset): ZyvoxSettings = when (target) {
-        InterfacePreset.NEAR -> withDistance(0.45f, target)
-        InterfacePreset.MEDIUM -> withDistance(InterfaceLayout.DEFAULT_DISTANCE_M, target)
-        InterfacePreset.FAR -> withDistance(1.60f, target)
-        InterfacePreset.CUSTOM -> copy(preset = target)
+    fun withPreset(target: InterfacePreset): ZyvoxSettings {
+        // `CUSTOM` não tem distância: manter os números do usuário É o comportamento dele.
+        val distance = target.distanceM ?: return copy(preset = target)
+        return withDistance(distance, target)
     }
 
     private fun withDistance(distanceM: Float, target: InterfacePreset): ZyvoxSettings = copy(

@@ -29,6 +29,7 @@
       um recurso que só funciona quando o rastreamento funciona não é testável.
     -->
     <string name="hud_background">Fundo</string>
+    <string name="hud_settings">Ajustes</string>
     <string name="hud_dock_smaller">Dock −</string>
     <string name="hud_dock_bigger">Dock +</string>
 

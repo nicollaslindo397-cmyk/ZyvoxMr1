@@ -479,6 +479,18 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
 
         // 5. HUD 2D.
         MrHud(viewModel = viewModel)
+
+        // 6. Centro de configurações, por cima do HUD.
+        //
+        // Depois do `MrHud` porque o painel cobre a tela inteira: se viesse antes, o botão "Ajustes"
+        // ficaria desenhado por cima do scrim e continuaria recebendo toque com o painel aberto, o
+        // que fecharia e reabriria o painel a cada toque no canto.
+        if (viewModel.settingsPanelOpen) {
+            SettingsPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.toggleSettingsPanel() },
+            )
+        }
     }
 
     // ─── Criação dos hosts, depois que a cena existe ────────────────────────────────────

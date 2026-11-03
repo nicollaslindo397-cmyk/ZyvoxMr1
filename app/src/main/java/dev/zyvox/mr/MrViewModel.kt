@@ -97,6 +97,21 @@ class MrViewModel(application: Application) : AndroidViewModel(application) {
 
     var dockVisible by mutableStateOf(true)
 
+    /**
+     * Se o centro de configurações está aberto.
+     *
+     * Vive aqui, e não num `remember` da tela, porque precisa sobreviver à recomposição de quem o
+     * abriu: o botão do HUD e o gesto do dock são caminhos diferentes para o mesmo estado, e um
+     * `remember` local tornaria o painel impossível de fechar por um caminho que não seja o próprio
+     * painel.
+     */
+    var settingsPanelOpen by mutableStateOf(false)
+        private set
+
+    fun toggleSettingsPanel() {
+        settingsPanelOpen = !settingsPanelOpen
+    }
+
     // ─── Configuração persistível ───────────────────────────────────────────────────────
 
     private val settingsStore = SettingsStore(application)

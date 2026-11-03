@@ -245,6 +245,44 @@ class ZyvoxSettingsTest {
     }
 
     @Test
+    fun `limiar de deteccao nao sai da faixa nos extremos por arredondamento`() {
+        // Regressão de float32, não de lógica: 0.60f - 1f * (0.60f - 0.20f) dá
+        // 0.19999998807907104, que é MENOR que DETECTION_CONFIDENCE_LOW (0.20000000298023224).
+        // A fórmula sozinha saía da faixa que a documentação dela promete, exatamente no extremo
+        // que o slider alcança. Aqui o HandSettings NÃO é sanitizado de propósito: a garantia tem de
+        // valer para quem lê a propriedade diretamente, não só depois de passar pelo sanitized().
+        for (sensitivity in floatArrayOf(
+            HandSettings.MIN_SENSITIVITY,
+            HandSettings.MAX_SENSITIVITY,
+            0f,
+            1f,
+        )) {
+            val confidence = HandSettings(sensitivity = sensitivity).detectionConfidence
+
+            assertTrue(
+                "sensibilidade $sensitivity gerou limiar $confidence, fora de " +
+                    "${HandSettings.DETECTION_CONFIDENCE_LOW}..${HandSettings.DETECTION_CONFIDENCE_HIGH}",
+                confidence >= HandSettings.DETECTION_CONFIDENCE_LOW &&
+                    confidence <= HandSettings.DETECTION_CONFIDENCE_HIGH,
+            )
+        }
+    }
+
+    @Test
+    fun `sensibilidade NaN sem sanitizar cai no padrao em vez de virar NaN`() {
+        // NaN.coerceIn(a, b) devolve NaN. Se isto chegasse ao MediaPipe como limiar de confiança,
+        // toda detecção seria rejeitada e o tracking morreria sem exceção nenhuma no log.
+        val confidence = HandSettings(sensitivity = Float.NaN).detectionConfidence
+
+        assertTrue(confidence.isFinite())
+        assertEquals(
+            HandSettings(sensitivity = HandSettings.DEFAULT_SENSITIVITY).detectionConfidence,
+            confidence,
+            1e-6f,
+        )
+    }
+
+    @Test
     fun `calibracao de cursor e limitada e sobrevive a NaN`() {
         val wild = HandSettings(
             calibrationX = 40f,
