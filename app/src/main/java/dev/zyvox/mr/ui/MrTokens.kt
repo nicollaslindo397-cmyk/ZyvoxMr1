@@ -80,48 +80,36 @@ object MrTokens {
      */
     const val INTERACTION_DEPTH_M = 0.45f
 
-    /** Profundidade do dock: um pouco mais perto que as janelas, para ler "à frente" delas. */
-    const val DOCK_DEPTH_M = 0.40f
-
     /**
-     * Posição vertical do dock no mundo. **Zero = centro exato do campo de visão.**
+     * Largura de **fallback** do dock, em metros, para o intervalo entre a criação do dock e a
+     * primeira medição do campo de visão.
      *
-     * Aqui estava `-0.20f`, e o efeito no aparelho foi concreto: para ver o dock o usuário
-     * precisava apontar o celular para baixo, porque o dock ficava 20 cm abaixo do centro da
-     * visão a 40 cm de distância — cerca de 27° para baixo. O pedido foi explícito ("quero que
-     * fique na direção dos olhos"), e num aparelho segurado à frente do rosto o centro do campo
-     * de visão É a direção dos olhos.
+     * ### Por que isto quase não importa mais
+     * A largura real vem da medição do campo de visão vezes [DOCK_WIDTH_FRACTION], recalculada
+     * quando a distância configurada muda. Este número só é lido enquanto a medição ainda não
+     * aconteceu (primeiro quadro), então ele precisa apenas ser razoável — não certo para todo
+     * aparelho, que é impossível sem conhecer o FOV.
      *
-     * Vale registrar por que "abaixo do centro" parecia certo no papel: é onde o dock do Quest 3
-     * fica. Mas lá o headset sabe para onde você olha e o dock acompanha; aqui a câmera é fixa
-     * no aparelho, então qualquer deslocamento vertical vira um ângulo que o braço tem de
-     * sustentar. Com 3DoF, centrado não é uma preferência estética — é o que não cansa.
-     */
-    const val DOCK_Y_M = 0.0f
-
-    /**
-     * Largura do dock no mundo, em metros.
+     * ### O que foi removido daqui, e por quê
+     * `DOCK_Y_M`, `DOCK_DEPTH_M`, `DOCK_SCALE_MIN` e `DOCK_SCALE_MAX` moravam aqui e agora não
+     * existem mais. Posição e profundidade passaram a vir de `settings.layout` (distância, altura,
+     * deslocamento horizontal e inclinação são ajustáveis pelo usuário), e os limites de escala
+     * passaram a vir de `InterfaceLayout.MIN_SCALE`/`MAX_SCALE`, que são os mesmos que a
+     * sanitização das configurações aplica.
      *
-     * Mora aqui junto com [DOCK_DEPTH_M] e [DOCK_Y_M]: os três descrevem onde o dock fica no
-     * espaço, e separá-los é o que fez `DockPanelHost` e `SpatialInputRouter` referenciarem
-     * `MrTokens.DOCK_WIDTH_M` quando o valor só existia em `DockPanelView`. O tamanho em PIXEL do
-     * dock continua em `DockPanelView.DOCK_WIDTH_PX` — aquele é um detalhe de layout da view; este
-     * é a geometria espacial que `pxPerUnits` e o teste de contenção consomem.
-     *
-     * 0,34 m a 0,40 m de profundidade cobre ~0,7 do campo de visão horizontal: largo o bastante
-     * para os ícones serem alvejáveis pelo hand tracking, estreito o bastante para não dominar o
-     * passthrough — a referência pede explicitamente um dock que NÃO preencha a tela.
-     *
-     * Este é o valor **base**: o tamanho real em uso é [DOCK_WIDTH_M] × `dockScale` do
-     * `MrViewModel`, porque o dock é redimensionável. Nada deve ler esta constante para decidir
-     * onde termina o dock — use a largura efetiva que o `DockPanelHost` expõe, senão o teste de
-     * contenção e o mapeamento de toque passam a valer só para a escala 1.0.
+     * Manter as duas coisas seria ter duas fontes de verdade sobre onde o dock fica e até onde ele
+     * pode crescer. Uma constante de posição sobrevivendo ao lado de uma posição configurável é o
+     * tipo de coisa que alguém lê, confia, e usa — e o resultado é um teste de contenção que vale
+     * para uma posição que o dock não ocupa mais.
      */
     const val DOCK_WIDTH_M = 0.34f
 
-    /** Limites da escala do dock. Abaixo de 0,8 os alvos ficam menores que o cursor; acima de 2,2 o dock come o campo de visão. */
-    const val DOCK_SCALE_MIN = 0.8f
-    const val DOCK_SCALE_MAX = 2.2f
+    /**
+     * Passo dos botões de aumentar/diminuir.
+     *
+     * Os limites NÃO estão aqui: são `InterfaceLayout.MIN_SCALE`/`MAX_SCALE`, para que o passo e o
+     * clamp descrevam o mesmo intervalo.
+     */
     const val DOCK_SCALE_STEP = 0.15f
 
     /**

@@ -8,7 +8,11 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import dev.zyvox.mr.hand.HandFrame
 import dev.zyvox.mr.hand.HandTrackerPipeline
-import dev.zyvox.mr.ui.MrTokens
+import dev.zyvox.mr.settings.DisplayMode
+import dev.zyvox.mr.settings.InterfaceLayout
+import dev.zyvox.mr.settings.InterfacePreset
+import dev.zyvox.mr.settings.SettingsStore
+import dev.zyvox.mr.settings.ZyvoxSettings
 import dev.zyvox.mr.window.MrWindow
 import dev.zyvox.mr.window.WindowStack
 
@@ -93,23 +97,85 @@ class MrViewModel(application: Application) : AndroidViewModel(application) {
 
     var dockVisible by mutableStateOf(true)
 
+    // ─── Configuração persistível ───────────────────────────────────────────────────────
+
+    private val settingsStore = SettingsStore(application)
+
     /**
-     * Escala do dock, aplicada sobre [dev.zyvox.mr.ui.MrTokens.DOCK_WIDTH_M].
+     * Toda a configuração do app, num único objeto imutável observável.
      *
-     * Observável de propósito (e não `@Volatile` como o resto do caminho de render): mudar a
-     * escala é uma ação rara e discreta do usuário, então vale uma recomposição. O que não pode
-     * é o estado por quadro do hand tracking virar observável — ver a KDoc da classe.
+     * Observável (e não `@Volatile` como o caminho de render) porque mudar configuração é uma
+     * ação rara do usuário e a UI precisa reagir: é isso que faz os ajustes valerem **em tempo
+     * real**, sem reiniciar o app. O que não pode é estado por quadro virar observável — ver a
+     * KDoc da classe.
+     *
+     * ### Fonte única de verdade
+     * `dockScale` e o modo de fundo costumavam ser campos separados aqui. Eles foram absorvidos
+     * por [settings]: ter `dockScale` e `settings.layout.scale` ao mesmo tempo são duas fontes
+     * que podem divergir em silêncio, e divergência entre "o que a UI mostra" e "o que a cena
+     * aplica" é invisível em código e intratável em aparelho.
      */
-    var dockScale by mutableStateOf(1.0f)
+    var settings by mutableStateOf(settingsStore.load())
         private set
 
     /**
-     * Ajusta o tamanho do dock. Preso entre [MrTokens.DOCK_SCALE_MIN] e
-     * [MrTokens.DOCK_SCALE_MAX]: abaixo disso os botões ficam menores que o cursor e o hand
-     * tracking não os acerta; acima, o dock passa a cobrir o conteúdo que ele existe para abrir.
+     * Único caminho de escrita. Sanitiza e persiste em todo ajuste.
+     *
+     * Centralizar importa porque as duas coisas são fáceis de esquecer num call site novo: sem
+     * sanitizar, um slider mal limitado grava um estado inutilizável; sem persistir, o ajuste
+     * funciona na sessão e some ao reabrir o app — que o usuário lê como "não salva".
+     */
+    fun updateSettings(transform: (ZyvoxSettings) -> ZyvoxSettings) {
+        val updated = transform(settings).sanitized()
+        settings = updated
+        settingsStore.save(updated)
+    }
+
+    /** Ajusta o posicionamento da interface. Marca o preset como personalizado. */
+    fun updateLayout(transform: (InterfaceLayout) -> InterfaceLayout) {
+        updateSettings { it.withLayout(transform(it.layout)) }
+    }
+
+    /** Escala vigente da interface. Derivada de [settings], nunca um campo próprio. */
+    val dockScale: Float get() = settings.layout.scale
+
+    /**
+     * Ajusta o tamanho em passos. Os limites vêm de [InterfaceLayout] — os mesmos que a
+     * sanitização aplica — para não existir uma segunda faixa de clamp que possa divergir.
      */
     fun adjustDockScale(delta: Float) {
-        dockScale = (dockScale + delta).coerceIn(MrTokens.DOCK_SCALE_MIN, MrTokens.DOCK_SCALE_MAX)
+        updateLayout { it.copy(scale = it.scale + delta) }
+    }
+
+    fun setDistance(meters: Float) = updateLayout { it.copy(distanceM = meters) }
+
+    fun setHeight(meters: Float) = updateLayout { it.copy(heightM = meters) }
+
+    fun setHorizontalOffset(meters: Float) = updateLayout { it.copy(offsetXM = meters) }
+
+    fun setTilt(degrees: Float) = updateLayout { it.copy(tiltDeg = degrees) }
+
+    fun setScale(scale: Float) = updateLayout { it.copy(scale = scale) }
+
+    /** Alterna "fixar a interface": ancorada no mundo, sem seguir a rotação da cabeça. */
+    fun togglePinned() = updateLayout { it.copy(pinned = !it.pinned) }
+
+    /** Aplica um dos quatro presets de distância. */
+    fun applyPreset(preset: InterfacePreset) = updateSettings { it.withPreset(preset) }
+
+    /**
+     * Recentraliza posição e inclinação, preservando distância, tamanho e fixação.
+     *
+     * Distinto de [resetAllSettings] de propósito: ver `InterfaceLayout.recentered`.
+     */
+    fun recenterInterface() = updateLayout { it.recentered() }
+
+    /** Restaura tudo para o padrão de fábrica. */
+    fun resetAllSettings() {
+        val defaults = ZyvoxSettings()
+        settings = defaults
+        settingsStore.save(defaults)
+        statusMessage = "Configurações restauradas"
     }
 
     /** Não-observável: só a HUD lê, e ela já recomposição por outros motivos. */
@@ -223,41 +289,41 @@ class MrViewModel(application: Application) : AndroidViewModel(application) {
 
     // ─── Fundo da experiência ───────────────────────────────────────────────────────────
 
-    /** O que aparece atrás dos painéis. Ver [toggleBackground]. */
-    enum class BackgroundMode {
-        /** Passthrough: o vídeo da câmera traseira, que é o modo padrão de um app de MR. */
-        CAMERA,
-
-        /** Ambiente virtual: céu de tempestade com chuva e relâmpago, desenhado pelo app. */
-        STORM,
-    }
-
-    var backgroundMode by mutableStateOf(BackgroundMode.CAMERA)
-        private set
-
     /**
-     * Alterna entre a câmera e o ambiente de tempestade. Disparado por mão direita fechada.
+     * Alterna entre passthrough e ambiente virtual. Disparado por mão direita fechada.
+     *
+     * O estado vive em [settings]`.displayMode`, não num campo próprio: o enum `BackgroundMode`
+     * que existia aqui foi absorvido por [DisplayMode], que é o mesmo conceito com o terceiro
+     * caso que o modo VR Box precisa. Manter os dois seria ter duas fontes de verdade sobre o
+     * que aparece atrás dos painéis.
      *
      * ### A câmera continua ligada nos dois modos
      * Isto é o ponto fácil de errar: trocar o fundo **não** pode fechar a câmera. O hand
      * tracking é alimentado pelo `ImageAnalysis` da mesma câmera que produz o passthrough, então
-     * desligá-la para mostrar a tempestade mataria todo o rastreamento de mãos no modo virtual —
-     * justamente o modo em que o usuário mais precisa dele, porque sem o vídeo do mundo real a
-     * única forma de interagir é a mão.
+     * desligá-la para mostrar o ambiente virtual mataria todo o rastreamento de mãos — justamente
+     * o modo em que o usuário mais precisa dele, porque sem o vídeo do mundo real a única forma de
+     * interagir é a mão.
      *
-     * O que muda é só o que se DESENHA: a camada de tempestade é pintada por cima do
-     * `PreviewView`. O `PreviewView` continua na árvore de composição (removê-lo desfaria o
-     * `DisposableEffect` que faz o bind da câmera) e continua recebendo quadros; apenas fica
-     * coberto.
+     * O que muda é só o que se DESENHA: a camada de ambiente é pintada por cima do `PreviewView`,
+     * que continua na árvore de composição (removê-lo desfaria o `DisposableEffect` que faz o
+     * bind da câmera) e continua recebendo quadros; apenas fica coberto.
      */
     fun toggleBackground() {
-        backgroundMode = when (backgroundMode) {
-            BackgroundMode.CAMERA -> BackgroundMode.STORM
-            BackgroundMode.STORM -> BackgroundMode.CAMERA
+        updateSettings {
+            it.copy(
+                displayMode = when (it.displayMode) {
+                    DisplayMode.MR_PASSTHROUGH -> DisplayMode.VR_FLAT
+                    // VR_BOX também volta para o passthrough: o gesto é um alterna de dois
+                    // estados, e sair do modo VR Box pelo mesmo gesto que entrou nele é o que o
+                    // usuário espera. Entrar em VR Box se faz pelas configurações.
+                    DisplayMode.VR_FLAT, DisplayMode.VR_BOX -> DisplayMode.MR_PASSTHROUGH
+                },
+            )
         }
-        statusMessage = when (backgroundMode) {
-            BackgroundMode.CAMERA -> "Fundo: câmera (passthrough)"
-            BackgroundMode.STORM -> "Fundo: tempestade"
+        statusMessage = when (settings.displayMode) {
+            DisplayMode.MR_PASSTHROUGH -> "Fundo: câmera (passthrough)"
+            DisplayMode.VR_FLAT -> "Fundo: ambiente virtual"
+            DisplayMode.VR_BOX -> "Modo VR Box"
         }
     }
 

@@ -27,12 +27,18 @@ import kotlin.math.roundToInt
  * que não são thread-safe.
  *
  * ### A regra de precedência
- * O dock é testado **antes** das janelas. Não é arbitrário: o dock está a
- * [dev.zyvox.mr.ui.MrTokens.DOCK_DEPTH_M] e as janelas a
- * [dev.zyvox.mr.window.MrWindow.DEFAULT_DEPTH], ou seja, o dock está *mais perto* do
- * usuário. Num plano de interação único, o objeto mais próximo é o que o usuário vê na frente
- * e é o que ele espera acertar. Testar as janelas primeiro faria o dock ficar "morto" numa
- * faixa onde uma janela passa por trás dele.
+ * Quem está **mais perto** do usuário é testado primeiro. Num plano de interação único, o objeto
+ * mais próximo é o que o usuário vê na frente e é o que ele espera acertar.
+ *
+ * Isto costumava ser uma ordem fixa (dock antes das janelas) justificada por o dock estar a 0,40 m
+ * e as janelas a 0,55 m. A distância do dock passou a ser ajustável pelo usuário, de 0,25 a 3,0 m,
+ * então a ordem não pode mais ser fixa: com o dock a 1,6 m e uma janela a 0,55 m, testar o dock
+ * primeiro faria ele roubar o clique de uma janela que está visivelmente na frente. Por isso a
+ * comparação agora é feita entre [dev.zyvox.mr.ui.DockPanelHost.worldDepthM] e a profundidade da
+ * janela mais próxima não minimizada, no quadro do gesto.
+ *
+ * A regra vale apenas para a sobreposição: se só um dos dois contém o ponto, é ele que recebe o
+ * gesto, independente da ordem. O dock não deixa de ser alcançável por estar atrás.
  *
  * ### Por que o alvo é travado no início do gesto
  * [activeTarget] é decidido no `DOWN` e não é reavaliado até o gesto terminar. Sem isso,
@@ -102,10 +108,16 @@ class SpatialInputRouter(
 
         // ── Gesto começando agora: escolhe o alvo ─────────────────────────────────────────
         if (activeTarget == Target.NONE) {
-            beginGesture(cursorX, cursorY)
-            // Se o alvo não for o dock, o controller decide entre mover/redimensionar/tocar.
-            if (activeTarget != Target.DOCK) {
+            // Ver a regra de precedência no KDoc da classe: a ordem depende de quem está mais
+            // perto, e isso agora é decidido por quadro porque a distância do dock é configurável.
+            val dockFirst = dockHost.worldDepthM <= nearestWindowDepthM(windows)
+            val dockHit = dockFirst && tryDock(cursorX, cursorY)
+
+            if (!dockHit) {
+                clearDock()
+                // O controller decide entre mover/redimensionar/tocar no conteúdo.
                 windowController.onHand(hand, cursorX, cursorY, cursorZ)
+                val windowHit = windowController.mode != WindowController.Mode.IDLE
                 if (windowController.mode == WindowController.Mode.TOUCH_CONTENT) {
                     activeTarget = Target.WINDOW
                     activePanelId = windowController.activeWindowId
@@ -114,6 +126,10 @@ class SpatialInputRouter(
                         panel.touch.down(px, py)
                     }
                 }
+                // Nenhuma janela pegou o gesto: o dock ainda pode estar debaixo do cursor, mesmo
+                // estando mais longe. Não testá-lo aqui deixaria o dock inalcançável exatamente
+                // quando o usuário o afastou — que é o ajuste que a seção de interface pede.
+                if (!windowHit && !dockFirst) tryDock(cursorX, cursorY)
             }
             return
         }
@@ -148,24 +164,51 @@ class SpatialInputRouter(
         }
     }
 
-    private fun beginGesture(x: Float, y: Float) {
-        if (dockHost.contains(x, y)) {
-            activeTarget = Target.DOCK
-            activeDockAction = actionAt(x)
-            // O feedback de "pressionado" vem do destaque, não de um MotionEvent sintético.
-            // Despachar DOWN aqui E invocar a ação diretamente no UP dispararia duas vezes:
-            // a célula tem `setOnClickListener`, então o stream sintético já acionaria a
-            // ação. Escolhemos o caminho direto (determinístico) e abrimos mão do ripple.
-            dockHost.view.setHighlighted(activeDockAction, true)
-            return
-        }
+    /**
+     * Tenta travar o gesto no dock.
+     *
+     * @return `true` se o ponto está dentro do dock, e então o alvo fica travado nele até o fim do
+     *   gesto. `false` não muda estado nenhum, para poder ser chamado depois de o controller já
+     *   ter olhado as janelas.
+     */
+    private fun tryDock(x: Float, y: Float): Boolean {
+        if (!dockHost.contains(x, y)) return false
+        activeTarget = Target.DOCK
+        activeDockAction = actionAt(x)
+        // O feedback de "pressionado" vem do destaque, não de um MotionEvent sintético.
+        // Despachar DOWN aqui E invocar a ação diretamente no UP dispararia duas vezes:
+        // a célula tem `setOnClickListener`, então o stream sintético já acionaria a
+        // ação. Escolhemos o caminho direto (determinístico) e abrimos mão do ripple.
+        dockHost.view.setHighlighted(activeDockAction, true)
+        return true
+    }
 
-        // Fora do dock: deixa o controller classificar (título → mover, alça → redimensionar,
-        // corpo → tocar no WebView).
+    /**
+     * Limpa o estado do dock antes de oferecer o gesto às janelas.
+     *
+     * Sem isto, um destaque de um quadro anterior ficaria aceso sobre uma célula que não vai
+     * receber o clique — o usuário vê um botão pressionado que não faz nada.
+     */
+    private fun clearDock() {
         activeTarget = Target.NONE
         activePanelId = null
         activeDockAction = null
         dockHost.view.setHighlighted(null, false)
+    }
+
+    /**
+     * Profundidade da janela mais próxima que pode receber o gesto.
+     *
+     * Janelas minimizadas ficam fora: elas não estão na tela, então não podem bloquear o dock.
+     * Sem janelas, devolve [Float.MAX_VALUE] — o dock é o único alvo e portanto tem precedência.
+     */
+    private fun nearestWindowDepthM(windows: List<MrWindow>): Float {
+        var nearest = Float.MAX_VALUE
+        for (window in windows) {
+            if (window.minimized) continue
+            if (window.depthMeters < nearest) nearest = window.depthMeters
+        }
+        return nearest
     }
 
     private fun releaseGesture() {
@@ -265,7 +308,7 @@ class SpatialInputRouter(
 
         // `activeTarget == Target.NONE` é o "não acertou nada": nem dock, nem título, nem alça,
         // nem corpo de janela. É avaliado no instante da subida do pinch, que é quando
-        // `beginGesture` já decidiu o alvo.
+        // `tryDock` já decidiu o alvo (ver a regra de precedência no KDoc da classe).
         val pinchActive = right != null && right.isPinching && !right.isFist &&
             activeTarget == Target.NONE
         if (pinchActive && !rightPinchWasActive &&

@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -18,11 +19,14 @@ import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.filament.View
+import dev.romainguy.kotlin.math.Float3
 import dev.zyvox.mr.MrViewModel
 import dev.zyvox.mr.camera.CameraController
 import dev.zyvox.mr.dock.DockPanelView
 import dev.zyvox.mr.hand.TrackedHand
+import dev.zyvox.mr.settings.DisplayMode
 import dev.zyvox.mr.spatial.HeadPoseTracker
+import dev.zyvox.mr.spatial.InterfaceTransform
 import dev.zyvox.mr.spatial.ScreenMapper
 import dev.zyvox.mr.spatial.SpatialInputRouter
 import dev.zyvox.mr.window.WindowController
@@ -174,6 +178,15 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
     var dockFitWidth by remember { mutableStateOf(0) }
     var dockFitHeight by remember { mutableStateOf(0) }
 
+    /**
+     * Corda, em metros, entre as direções unitárias das duas bordas da tela.
+     *
+     * Não é a largura visível: é o fator que, multiplicado pela distância, dá a largura visível
+     * naquela distância. Ver o bloco de medição em `onFrame` para o porquê de esta grandeza ser a
+     * certa para cachear.
+     */
+    var frustumSpan by remember { mutableFloatStateOf(0f) }
+
     // Estado das janelas (observável: muda raramente).
     val windows = viewModel.windows
 
@@ -219,8 +232,8 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
         }
     }
 
-    // Lido aqui, e não dentro do Box, para que a mudança de fundo recomponha esta camada.
-    val backgroundMode = viewModel.backgroundMode
+    // Lido aqui, e não dentro do Box, para que a mudança de modo recomponha esta camada.
+    val displayMode = viewModel.settings.displayMode
 
     Box(modifier = Modifier.fillMaxSize()) {
         // 1. Passthrough.
@@ -238,7 +251,7 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
         // 2. Ambiente virtual, quando escolhido. Cobre o passthrough por completo: é opaco de
         // propósito, porque um céu de tempestade com o vídeo da câmera vazando por baixo não lê
         // como ambiente, lê como defeito.
-        if (backgroundMode == MrViewModel.BackgroundMode.STORM) {
+        if (displayMode != DisplayMode.MR_PASSTHROUGH) {
             StormBackdrop()
         }
 
@@ -281,42 +294,54 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
                 wHost.sync(windows)
                 dHost.setVisible(viewModel.dockVisible)
 
-                // ── Mede o campo de visão na profundidade do dock ─────────────────────────
+                // ── Mede o campo de visão, para o dock ocupar uma fração dele ──────────────
                 //
-                // O dock passa a ocupar uma FRAÇÃO do que a câmera enxerga na profundidade dele,
-                // em vez de um número fixo em metros. Metros absolutos não significam nada sem
-                // conhecer o FOV: os mesmos 0,34 m podem ocupar metade da tela num aparelho e
-                // transbordar noutro, e o FOV muda com aparelho, proporção e orientação. Foi
+                // O dock ocupa uma FRAÇÃO do que a câmera enxerga, em vez de um número fixo em
+                // metros. Metros absolutos não significam nada sem conhecer o FOV: os mesmos
+                // 0,34 m podem ocupar metade da tela num aparelho e transbordar noutro. Foi
                 // exatamente isso que fez a interface parecer "cada vez menor" — o tamanho em
                 // pixel do dock subiu de 1120 para 1400 enquanto a largura em metros ficou em
                 // 0,34, então cada botão encolheu de 6,8 para 4,25 cm sem que nada avisasse.
                 //
-                // Custa duas `screenToWorld`, mas só quando o viewport muda: a câmera é 3DoF
-                // (só escrevemos `quaternion`, nunca `position`), e rotação é transformação
-                // rígida — preserva distância entre pontos do mundo. Então a largura visível a
-                // uma profundidade fixa NÃO depende da orientação da cabeça, e cachear por
-                // tamanho de viewport é correto, não apenas econômico.
-                if (dockFitWidth != viewWidthPx || dockFitHeight != viewHeightPx) {
+                // E a largura visível CRESCE COM A DISTÂNCIA (`2·d·tan(hfov/2)`), o que é o que
+                // torna o tamanho aparente invariante quando o usuário aproxima ou afasta a
+                // interface. Medir uma largura só, numa profundidade fixa, e reusá-la para
+                // qualquer distância quebraria isso: afastar a interface a faria encolher na tela,
+                // que é o defeito que este bloco existe para impedir.
+                //
+                // Então o que se cacheia é a CORDA entre as direções unitárias das duas bordas,
+                // que multiplicada pela distância dá a largura naquela distância. A corda é
+                // invariante à orientação da cabeça porque as duas direções giram juntas — o
+                // ângulo entre elas não muda — então medí-la uma vez por viewport é correto, não
+                // apenas econômico. Custa quatro `screenToWorld` por mudança de viewport, e zero
+                // por quadro.
+                if (frustumSpan <= 0f || dockFitWidth != viewWidthPx || dockFitHeight != viewHeightPx) {
                     val midY = viewHeightPx / 2f
-                    val left = filamentView.screenToWorld(0f, midY, NEAR_SAMPLE_Z)
-                    val right = filamentView.screenToWorld(viewWidthPx.toFloat(), midY, NEAR_SAMPLE_Z)
-                    if (left != null && right != null) {
-                        val dx = right.x - left.x
-                        val dy = right.y - left.y
-                        val dz = right.z - left.z
-                        val width = sqrt(dx * dx + dy * dy + dz * dz)
-                        if (width.isFinite() && width > 1e-4f) {
+                    val leftDir = rayDirection(filamentView, 0f, midY)
+                    val rightDir = rayDirection(filamentView, viewWidthPx.toFloat(), midY)
+                    if (leftDir != null && rightDir != null) {
+                        val spanX = rightDir.x - leftDir.x
+                        val spanY = rightDir.y - leftDir.y
+                        val spanZ = rightDir.z - leftDir.z
+                        val span = sqrt(spanX * spanX + spanY * spanY + spanZ * spanZ)
+                        if (span.isFinite() && span > 1e-4f) {
+                            frustumSpan = span
                             dockFitWidth = viewWidthPx
                             dockFitHeight = viewHeightPx
-                            dHost.applyVisibleWidth(width * MrTokens.DOCK_WIDTH_FRACTION)
                         }
                     }
                 }
 
-                // A escala do dock é aplicada aqui, não num `LaunchedEffect(dockScale)`: o
-                // `applyScale` é idempotente e só reescreve `pxPerUnits` quando o valor mudou de
-                // fato, então o custo por frame é uma comparação de float.
-                dHost.applyScale(viewModel.dockScale)
+                val layout = viewModel.settings.layout
+                if (frustumSpan > 0f) {
+                    dHost.applyVisibleWidth(frustumSpan * layout.distanceM * MrTokens.DOCK_WIDTH_FRACTION)
+                }
+                // Posição, inclinação e escala vêm das configurações do usuário, aplicadas por
+                // quadro. `applyPlacement` é idempotente — cada setter só escreve quando o valor
+                // mudou — então o custo por quadro são algumas comparações de float, e é isso que
+                // faz um slider mover a interface em tempo real, sem reiniciar nem esperar
+                // recomposição.
+                dHost.applyPlacement(InterfaceTransform.placementFor(layout))
 
                 // ── Projeção do cursor ────────────────────────────────────────────────────
                 val hand: TrackedHand? = viewModel.latestHandFrame.hands.firstOrNull()
@@ -543,6 +568,44 @@ fun MrScreen(viewModel: MrViewModel = viewModel()) {
  * inverte a proporção e o cursor sai completamente do lugar, o que é o bug mais fácil de
  * introduzir aqui e o mais difícil de perceber sem olhar o número.
  */
+/**
+ * Direção unitária do raio que sai da câmera e passa por um pixel da tela.
+ *
+ * ### Por que duas amostras em vez de um `z` de profundidade
+ * `screenToWorld(x, y, z)` recebe um `z` NORMALIZADO (1 = plano próximo), não uma distância em
+ * metros, então ele sozinho não responde "onde está este pixel a 0,8 m da câmera". Duas amostras
+ * no mesmo pixel dão dois pontos do mesmo raio, e a diferença é a direção.
+ *
+ * ### Por que o sinal da direção não é decorado
+ * `Camera.viewToRay` do SceneView monta `viewToWorld(z=1) - viewToWorld(z=0)`, ou seja, do plano
+ * próximo para o infinito — o oposto do que se quer aqui. Em vez de confiar na convenção, comparamos
+ * a distância de cada amostra à origem: em 3DoF a câmera fica na origem (só escrevemos `quaternion`,
+ * nunca `position`), então a amostra mais distante da origem é a mais funda na cena, e o vetor que
+ * vai da mais próxima à mais distante aponta para longe da câmera por construção. Se uma versão
+ * futura do SceneView inverter o mapeamento de `z`, isto continua certo.
+ *
+ * @return `null` quando qualquer amostra é degenerada. Nunca devolve vetor de comprimento zero ou
+ *   com NaN: quem chama usa o resultado como divisor.
+ */
+private fun rayDirection(view: View, screenX: Float, screenY: Float): Float3? {
+    val near = view.screenToWorld(screenX, screenY, NEAR_SAMPLE_Z) ?: return null
+    val far = view.screenToWorld(screenX, screenY, FAR_SAMPLE_Z) ?: return null
+
+    // `screenToWorld` devolve a origem quando o `w` do espaço de recorte degenera. Uma amostra na
+    // origem faria a comparação de distância abaixo escolher o lado errado.
+    val nearDist2 = near.x * near.x + near.y * near.y + near.z * near.z
+    val farDist2 = far.x * far.x + far.y * far.y + far.z * far.z
+    if (nearDist2 <= 1e-12f || farDist2 <= 1e-12f || farDist2 <= nearDist2) return null
+
+    val dx = far.x - near.x
+    val dy = far.y - near.y
+    val dz = far.z - near.z
+    val len = sqrt(dx * dx + dy * dy + dz * dz)
+    if (len <= 1e-6f) return null
+
+    return Float3(dx / len, dy / len, dz / len)
+}
+
 internal class UprightSize(val width: Int, val height: Int) {
     companion object {
         fun of(rawWidth: Int, rawHeight: Int, rotationDegrees: Int): UprightSize? {
