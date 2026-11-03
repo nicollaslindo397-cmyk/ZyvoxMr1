@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Ícone adaptativo simples, desenhado em vetor: sem PNGs binários no repositório.
+    Motivo próprio do Zyvox MR (um visor com um ponto de cursor), sem relação com
+    qualquer outra identidade visual.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Visor: retângulo arredondado em traço claro. -->
+    <path
+        android:pathData="M30,42 h48 a8,8 0 0 1 8,8 v8 a8,8 0 0 1 -8,8 h-48 a8,8 0 0 1 -8,-8 v-8 a8,8 0 0 1 8,-8 z"
+        android:strokeColor="@color/mr_ic_foreground"
+        android:strokeWidth="4"
+        android:fillColor="#00000000" />
+
+    <!-- Cursor: o ponto que o hand tracking projeta no espaço. -->
+    <path
+        android:pathData="M54,54 m-6,0 a6,6 0 1 0 12,0 a6,6 0 1 0 -12,0"
+        android:fillColor="@color/mr_ic_foreground" />
+
+    <!-- Dois traços laterais: as duas mãos rastreadas. -->
+    <path
+        android:pathData="M36,68 v6 M72,68 v6"
+        android:strokeColor="@color/mr_ic_foreground"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+</vector>

@@ -1,0 +1,44 @@
+// ─── Por que este arquivo existe ─────────────────────────────────────────────────────────────
+// Para fixar a versão do Kotlin que o AGP 9 usa internamente. Nenhum plugin é *aplicado* aqui.
+//
+// O AGP 9 compila Kotlin sozinho ("built-in Kotlin") e resolve o Kotlin Gradle Plugin a partir
+// do classpath de buildscript, com **padrão 2.2.10** quando nada o eleva. Ele NÃO consulta o
+// catálogo de versões: declarar `kotlin = "2.4.21"` em `gradle/libs.versions.toml` não tem
+// efeito nenhum sobre o compilador embutido — aquela versão só chegava ao plugin do compilador
+// Compose, que é versionado junto com o Kotlin.
+//
+// Este projeto precisa do Kotlin 2.4.21 porque o SceneView 4.65.0 é compilado com ele e puxa
+// `kotlin-stdlib` 2.4.21. Com o compilador no padrão do AGP, `:app:testDebugUnitTest` quebrou
+// assim:
+//
+//   Class 'kotlin.Unit' was compiled with an incompatible version of Kotlin.
+//   The actual metadata version is 2.4.0, but the compiler version 2.2.0 can read
+//   versions up to 2.3.0.
+//
+// E essa falha se disfarça. Junto com ela vieram dezenas de
+// `Unresolved reference 'apply'`, `'firstOrNull'`, `'isNullOrBlank'` — funções básicas da
+// stdlib, espalhadas por `WindowController.kt` e `WindowPanelView.kt`. Como o compilador não
+// consegue LER o jar da stdlib 2.4.21, tudo que vem dela parece não existir. Os erros apontam
+// para o código do app, mas o código está certo: o problema é a ferramenta. Procurar bug em
+// `apply` é o caminho errado, e é fácil de tomar.
+//
+// `apply false` é o que torna isto seguro: põe o KGP 2.4.21 no classpath de buildscript (e com
+// ele a versão do compilador embutido) sem APLICAR `org.jetbrains.kotlin.android` a módulo
+// nenhum. Aplicá-lo é o que o AGP 9 proíbe ("The 'org.jetbrains.kotlin.android' plugin is no
+// longer required for Kotlin support since AGP 9.0"). A distinção importa: o que o AGP veta é a
+// aplicação, não a presença no classpath.
+//
+// Tem de ser na raiz e não em `:app`: só pode haver uma versão de Kotlin por build, e o
+// classpath de buildscript da raiz é o que todos os subprojetos veem.
+plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.android) apply false
+}
+
+// Sobre o JVM target: NÃO há bloco `android { kotlinOptions { } }` em lugar nenhum, e também não
+// há `kotlin { compilerOptions { … } }` no módulo app. Sob o Kotlin embutido do AGP 9 o
+// jvmTarget é derivado de `compileOptions.targetCompatibility`, que `:app` já declara como
+// VERSION_21. Escrever `kotlin { compilerOptions { jvmTarget.set(…) } }` quebraria o script:
+// aquela DSL referencia `org.jetbrains.kotlin.gradle.dsl.JvmTarget`, e referenciar classe do KGP
+// num script é diferente de ter o KGP no classpath de buildscript — o primeiro precisa da
+// dependência de compilação do script, que aqui não existe.

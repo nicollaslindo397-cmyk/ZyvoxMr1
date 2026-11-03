@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zyvox MR</string>
+
+    <!-- Permissão de câmera -->
+    <string name="permission_camera_title">Câmera necessária</string>
+    <string name="permission_camera_body">O Zyvox MR usa a câmera traseira como passthrough e para rastrear suas mãos. Nada é enviado para fora do aparelho.</string>
+    <string name="permission_camera_grant">Permitir câmera</string>
+    <string name="permission_camera_settings">Abrir configurações</string>
+    <string name="permission_camera_denied">Sem acesso à câmera não há passthrough nem hand tracking.</string>
+
+    <!-- Estado / avisos -->
+    <string name="status_initializing">Iniciando câmera…</string>
+    <string name="status_no_model">Modelo de hand tracking ausente — veja BUILD.md</string>
+    <!--
+      Diz ONDE pôr a mão, porque com câmera traseira isso não é óbvio e é o contrário do
+      instinto: a mão que segura o aparelho fica do lado da tela, onde a câmera não vê.
+
+      A versão anterior desta string dizia "entre ele e você", o que estava ERRADO e pior que
+      não dizer nada: a câmera traseira aponta para LONGE de quem segura o aparelho, então uma
+      mão entre o celular e o rosto fica atrás da câmera e nunca aparece. Estender o braço é o
+      movimento certo.
+    -->
+    <string name="status_show_hands">Estenda o braço: a mão precisa estar ALÉM do aparelho, do lado oposto à tela</string>
+    <string name="status_tracking">Rastreando %1$d mão(s)</string>
+
+    <!--
+      Controles de fallback do HUD. Todos existem também como gesto de mão; estão aqui porque
+      um recurso que só funciona quando o rastreamento funciona não é testável.
+    -->
+    <string name="hud_background">Fundo</string>
+    <string name="hud_settings">Ajustes</string>
+    <string name="hud_dock_smaller">Dock −</string>
+    <string name="hud_dock_bigger">Dock +</string>
+
+    <!--
+      Documenta os gestos globais. São invisíveis por natureza — nada na tela indica que
+      existem — então sem esta linha o usuário nunca os descobriria.
+    -->
+    <string name="hud_gesture_hint">Mão direita: pinch no vazio = dock · mão fechada = fundo</string>
+
+    <!-- Dock -->
+    <string name="dock_toggle">Mostrar/ocultar dock</string>
+    <string name="dock_youtube">YouTube</string>
+    <string name="dock_chrome">Chrome</string>
+    <string name="dock_apps">Aplicativos</string>
+    <string name="dock_recenter">Recentralizar</string>
+    <string name="dock_smaller">Diminuir dock</string>
+    <string name="dock_bigger">Aumentar dock</string>
+    <string name="dock_settings">Ajustes</string>
+    <string name="dock_close_all">Fechar tudo</string>
+
+    <!-- Janelas -->
+    <string name="window_minimize">Minimizar</string>
+    <string name="window_close">Fechar</string>
+    <string name="window_resize">Redimensionar</string>
+    <string name="window_move">Mover</string>
+    <string name="window_new_tab">Nova janela</string>
+
+    <!-- Barra de endereço -->
+    <string name="url_hint">Endereço ou busca</string>
+    <string name="url_open">Abrir</string>
+    <string name="url_default">https://www.google.com</string>
+
+    <!--
+      Destinos dos botões do dock.
+
+      `url_default` era `https://example.com`, um placeholder de desenvolvimento que virou a
+      página que todo botão abria. Agora é o Google, que é o que "Janela" quer dizer na
+      prática: uma página inicial com barra de endereço para ir a qualquer outro site.
+
+      `m.youtube.com` em vez de `youtube.com`: o site desktop assume ponteiro e janela grande,
+      e num WebView de ~0,6 m o layout móvel é o que presta. O Chrome fica no domínio comum
+      porque ele mesmo redireciona e o usuário pode querer a versão desktop.
+    -->
+    <string name="url_youtube">https://m.youtube.com</string>
+    <string name="url_chrome">https://www.google.com/chrome/</string>
+
+    <!-- Acessibilidade -->
+    <string name="cd_hand_cursor">Cursor da mão</string>
+    <string name="cd_camera_preview">Passthrough da câmera traseira</string>
+</resources>

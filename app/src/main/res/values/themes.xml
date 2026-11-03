@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+        Tema escuro e sem barra de ação: a experiência é fullscreen com o passthrough
+        ocupando tudo. A paleta de fato vive em ui/MrTokens.kt — aqui só o mínimo para a
+        Activity não piscar branca no cold start antes do Compose assumir.
+    -->
+    <style name="Theme.ZyvoxMr" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/mr_background</item>
+        <item name="android:colorBackground">@color/mr_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- 27+: desenha sob o recorte da tela, já que a experiência é imersiva. -->
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
+    </style>
+</resources>
